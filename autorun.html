@@ -99,7 +99,7 @@ consoles too starved for the full array&rdquo;</i> &mdash; which is this console
 /* The queue lives in localStorage because every chunk is a separate page load:
    notify.html navigates back here with ?done=<index> when the chunk ends,
    however it ends. Nothing survives in memory between chunks. */
-var LS = "slopkit.autorun.v1";
+var LS = "slopkit.autorun.v2";
 var state = null;
 
 function save() { try { localStorage.setItem(LS, JSON.stringify(state)); } catch (e) {} }
@@ -132,6 +132,8 @@ fetch("offsets.json?v=" + Date.now(), { cache: "no-store" })
     if (!fwEl.value) fwEl.value = "13.60";
   })
   .catch(function (e) { setStatus("offsets.json failed: " + e.message, "err"); });
+
+var watchdog = null;
 
 function setStatus(t, cls) {
   document.getElementById("status").innerHTML =
@@ -205,13 +207,19 @@ function launch(i) {
   q.set("notaska", "1");
   q.set("scanmb", String(r.mb));
   q.set("wstart", "0x" + r.start.toString(16).toUpperCase());
-  q.set("n", state.mem);
+  q.set("n", state.mem == null ? "64" : state.mem);
   /* The big one. Default CARRIER_SLOTS is 9,000,000 -> 69 MB allocated in one
      page, which is what "There is not enough free system memory" is refusing.
      Upstream calls car=2000000 "emergency mode ... for consoles too starved for
      the full array". */
-  q.set("car", String(state.car))
-  q.set("max", String(state.max == null ? 5 : state.max));
+  // A state saved before these fields existed resumes with undefined, and
+  // String(undefined) made the console fall back to its 69 MB default spray.
+  // Guard every one of them.
+  q.set("car", String(state.car == null ? 2000000 : state.car))
+  q.set("max", String(state.max == null ? 5 : state.max))
+  // Give the console page a wall-clock budget, then it walks itself to the
+  // next chunk even if a native memory dialog is sitting over the browser.
+  q.set("deadline", String(state.deadline == null ? 90000 : state.deadline))
   q.set("autorun", String(i));
   if (state.sink === "ntfy") {
     q.set("sink", "ntfy");
@@ -247,7 +255,7 @@ try {
       setStatus("chunk " + (i + 1) + " ended (" + why + ") &mdash; next chunk in 1s...");
       render();
     } else {
-      state.running = false; save(); render();
+      state.running = false; if (watchdog) clearInterval(watchdog); save(); render();
       setStatus("run finished. Open the harvester to build the offset file.", "ok");
     }
   } else if (load()) {
@@ -296,15 +304,48 @@ document.getElementById("start").onclick = function () {
   }
   state = {
     fw: fw, sink: document.getElementById("sink").value,
-    mem: document.getElementById("mem").value,
+    mem: (document.getElementById("mem") || {value:"64"}).value,
     car: document.getElementById("car").value,
     max: (document.getElementById("max") || {value:"5"}).value,
+    deadline: 90000,
     topic: "ps5slopkit" + fw.replace(/[^0-9]/g, ""),
     rows: rows, index: 0, running: true
   };
   save(); render();
+  armWatchdog();
   launch(0);
 };
+
+/* If the console page dies without navigating -- a panic, a hard dialog, a
+   killed renderer -- the run would sit forever. Poll the stored state: if the
+   index has not advanced within the deadline plus slack, jump to the next
+   chunk ourselves. */
+function armWatchdog() {
+  if (watchdog) clearInterval(watchdog);
+  var seenIndex = state ? state.index : -1;
+  var since = Date.now();
+  var budget = ((state && state.deadline) || 90000) + 30000;
+  watchdog = setInterval(function () {
+    if (!state || !state.running) { clearInterval(watchdog); return; }
+    if (state.index !== seenIndex) { seenIndex = state.index; since = Date.now(); return; }
+    if (Date.now() - since > budget) {
+      clearInterval(watchdog);
+      setStatus("chunk " + (seenIndex + 1) + " stalled for "
+        + Math.round(budget / 1000) + "s \u2014 skipping to the next one.", "warn");
+      state.index = Math.min(state.index + 1, state.rows.length - 1);
+      state.rows[state.index].status = state.rows[state.index].status || "pending";
+      save(); render();
+      if (state.index + 1 >= state.rows.length) {
+        state.running = false; save(); render();
+        setStatus("run finished (last chunk was skipped after a stall). "
+          + "Open the harvester to build the offset file.", "ok");
+        return;
+      }
+      since = Date.now(); armWatchdog();
+      launch(state.index + 1);
+    }
+  }, 5000);
+}
 
 document.getElementById("stop").onclick = function () {
   if (!state) return;

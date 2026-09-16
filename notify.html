@@ -376,7 +376,21 @@ async function runOnConsoleScan(candidate) {
 const DRAIN_COUNT = intParam("n", 512, 32, 1024);
 
 const REVISION = "renderer-notify-auto-proof-2";
+// Belt and braces: if any part of the chain raises a JS dialog we must not let
+// it block the deadline timer from navigating.
+try {
+    window.alert = function () {};
+    window.confirm = function () { return true; };
+    window.prompt = function () { return null; };
+} catch (e) { /* non-fatal */ }
 const AUTO_RETRY_DELAY_MS = intParam("rd", 50, 0, 60000);
+// Hard deadline. The "not enough free system memory" dialog is a native PS5
+// dialog: it covers the browser chrome, so you cannot press Back or tap the
+// harvester while it is up. A stuck page therefore halts an unattended run.
+// This timer navigates to the next chunk regardless of what state the exploit
+// is in -- it does not need the dialog dismissed, and it does not need a tap.
+// 0 disables it.
+const DEADLINE_MS = intParam("deadline", 0, 0, 600000);
 const MAX_ATTEMPTS = intParam("max", 0, 0, 1000000);
 const SCREEN_LINES = intParam("lines", 14, 0, 400);
 const K = 2;
@@ -749,6 +763,17 @@ if (DB_ON || NTFY_ON) window.addEventListener("beforeunload", dbFlushFinal);
 // config; this hands control back when the run ends, however it ends.
 const AUTORUN = Q.get("autorun") || null;
 function autoNext(reason) {
+    // One shot: a deadline firing twice would double-navigate.
+    if (window.__deadlineArmed === undefined) {
+        window.__deadlineArmed = true;
+        if (DEADLINE_MS > 0) {
+            setTimeout(function () {
+                mark("DEADLINE-HIT", `ms=${DEADLINE_MS}-navigating=1`);
+                if (typeof dbFlushFinal === "function") { try { dbFlushFinal(); } catch (e) {} }
+                autoNext("deadline");
+            }, DEADLINE_MS);
+        }
+    }
     if (!AUTORUN) return;
     dbFlush();                       // get the last batch out before navigating
     setTimeout(function () {
