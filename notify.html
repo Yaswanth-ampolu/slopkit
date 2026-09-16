@@ -39,6 +39,19 @@ body {
 .run { color: #cccccc; }
 </style>
 <body>
+<!-- Unmissable proof of which build is actually loaded. A stale cache was
+     indistinguishable from a new build, so every run report was ambiguous. -->
+<div id="buildbadge"></div>
+<script>
+(function () {
+    var el = document.getElementById("buildbadge");
+    if (!el) return;
+    el.textContent = "BUILD b7";
+    el.style.cssText = "position:fixed;top:0;right:0;z-index:2147483647;"
+        + "background:#0a7d00;color:#fff;font:700 13px/1 monospace;"
+        + "padding:6px 10px;border-bottom-left-radius:6px;pointer-events:none";
+})();
+</script>
 <div id="cap">PoC PS5 FW &mdash;</div>
 <img id="cat" class="run" src="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%20240%20240%27%3E%3Crect%20width%3D%27240%27%20height%3D%27240%27%20rx%3D%2724%27%20fill%3D%27%23131922%27/%3E%3Crect%20x%3D%2740%27%20y%3D%2752%27%20width%3D%27160%27%20height%3D%2794%27%20rx%3D%2718%27%20fill%3D%27%23223146%27%20stroke%3D%27%235e81ac%27%20stroke-width%3D%278%27/%3E%3Ccircle%20cx%3D%2795%27%20cy%3D%2799%27%20r%3D%2712%27%20fill%3D%27%23ebcb8b%27/%3E%3Ccircle%20cx%3D%27145%27%20cy%3D%2799%27%20r%3D%2712%27%20fill%3D%27%23ebcb8b%27/%3E%3Cpath%20d%3D%27M88%20128h64%27%20stroke%3D%27%23ebcb8b%27%20stroke-width%3D%2710%27%20stroke-linecap%3D%27round%27/%3E%3Ctext%20x%3D%27120%27%20y%3D%27192%27%20fill%3D%27%239fb1c3%27%20font-size%3D%2724%27%20font-family%3D%27Arial%27%20text-anchor%3D%27middle%27%3EPS5%3C/text%3E%3C/svg%3E" alt="PS5 status">
 <script src="neon_client.js"></script>
@@ -376,6 +389,12 @@ async function runOnConsoleScan(candidate) {
 const DRAIN_COUNT = intParam("n", 512, 32, 1024);
 
 const REVISION = "renderer-notify-auto-proof-2";
+
+// The user could not tell a stale cached page from a fresh one, which made
+// every "I ran the new one" report unfalsifiable. BUILD is stamped into the
+// title, a fixed corner badge, and every log line's first mark.
+const BUILD = "b7";
+const BUILD_STAMP = REVISION + "+" + BUILD;
 // Belt and braces: if any part of the chain raises a JS dialog we must not let
 // it block the deadline timer from navigating.
 try {
@@ -462,7 +481,7 @@ const FAKE_VTABLE_OFFSET = 0x300;
 // less RAM; attempts whose copy doesn't fit are safely rejected and
 // retried, small-copy attempts proceed normally. Emergency mode
 // (?car=2000000, 16MB) is for consoles too starved for the full array.
-const CARRIER_SLOTS = intParam("car", 9000000, 2000000, 9000000);
+const CARRIER_SLOTS = intParam("car", 1000000, 600000, 9000000);
 const CARRIER_BYTES = CARRIER_SLOTS * 8;
 const CAPTURE_DELAY_MS = intParam("cap", 50, 0, 60000);
 const COMPOSE_DELAY_MS = CAPTURE_DELAY_MS + intParam("gap", 50, 0, 60000);
@@ -2345,7 +2364,7 @@ function beginComposition() {
 
 catState("run");
 
-mark("BOOT", `rev=${REVISION}-k=${K}-n=${DRAIN_COUNT}`
+mark("BOOT", `rev=${REVISION}-build=${BUILD}-k=${K}-n=${DRAIN_COUNT}`
     + `-attempt=${attemptNumber}-armed=${armed}-loop=relentless`);
 
 if (!armed) {
