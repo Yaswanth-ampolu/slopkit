@@ -167,15 +167,21 @@ then <code>emergency (n=32, full carrier)</code></li>
 are staying offline. You read results off the screen instead.</li>
 <li><b><code>ntfy.sh</code></b> &mdash; <b>use this one.</b> It sends the
 findings out so they can be collected without photographing anything.</li>
-<li><b><code>database</code></b> &mdash; the original path. It fails on this
-console; leave it alone.</li>
+<li><b><code>database</code></b> &mdash; also works now. Better for very large
+sweeps; see the note below.</li>
 </ul>
 <div class="card">
-<p style="margin-bottom:0"><b>Why ntfy works when the database does not.</b>
-The database endpoint needs a special authentication header, and a custom
-header makes the browser send a permission request first. ntfy takes a plain
-POST with no special headers, so there is no permission step to fail. Same job,
-one less thing in the way.</p>
+<p><b>Why the database used to fail, and why ntfy did not.</b></p>
+<p>The database endpoint needs an authentication header, and adding any custom
+header makes the browser ask permission first. As part of that request the code
+was also declaring <code>Content-Type: application/json</code> &mdash; and the
+database's server does not list <code>content-type</code> among the headers it
+permits. So the browser refused to send anything at all, and the console
+reported a bare network error with no status code.</p>
+<p style="margin-bottom:0">That declaration has been removed. The body is still
+JSON and the server accepts it; the only header left is the one the server does
+allow. <b>Both sinks now work</b> &mdash; ntfy is simply the simpler of the two,
+which is why it stays the default.</p>
 </div>
 
 <h3><code>Sweep gadgets from</code> box</h3>
@@ -352,7 +358,7 @@ candidates and the notify offset, which the sweep does not produce.</p>
 <tr><td>&ldquo;Out of memory&rdquo; text</td><td>same, mid-sweep</td><td>Smaller chunks. Do not raise <code>scanmb</code> past <code>1</code>.</td></tr>
 <tr><td>Kernel panic partway</td><td>bad read</td><td>Reboot, set <code>wstart</code> to <code>0</code>, retry</td></tr>
 <tr><td>Several <code>SCAN-MISSING</code></td><td>range not covered yet</td><td>Finish the Auto Runner, then widen <code>Cover MB</code></td></tr>
-<tr><td><code>db: UNREACHABLE (0)</code></td><td>database endpoint blocked</td><td>Switch sink to <b>ntfy.sh</b>. It sends no custom headers.</td></tr>
+<tr><td><code>db: UNREACHABLE (0)</code></td><td>fixed &mdash; was a refused permission request</td><td>Reload the page to pick up the fix. Or switch sink to <b>ntfy.sh</b>.</td></tr>
 <tr><td>Harvester loads 0 lines</td><td>wrong topic, or nothing sent</td><td>Topic must match <code>ps5slopkit</code> + firmware digits, e.g. <code>ps5slopkit1360</code></td></tr>
 <tr><td>Harvester &ldquo;DROPPED&rdquo; row</td><td>sink lost a batch in flight</td><td>Press <code>Load findings</code> again &mdash; it re-polls until stable</td></tr>
 </table>

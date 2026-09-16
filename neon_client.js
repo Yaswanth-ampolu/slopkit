@@ -55,7 +55,22 @@ NeonRelay.prototype.sql = function (query, params, onOk, onErr) {
     var self = this;
     x.open('POST', this.url, true);
     x.timeout = 180000;
-    x.setRequestHeader('Content-Type', 'application/json');
+    /* Do NOT set Content-Type: application/json here.
+       `application/json` is not a CORS-safelisted content type, so sending it
+       forces a preflight, and the preflight then has to ask Neon's permission
+       for a `content-type` request header. Neon's response is static and does
+       NOT list content-type among the headers it allows:
+
+           access-control-allow-headers: Authorization, Neon-Connection-String,
+             Neon-Raw-Text-Output, Neon-Array-Mode, Neon-Pool-Opt-In,
+             Neon-Batch-Read-Only, Neon-Batch-Isolation-Level, Neon-Client-Info
+
+       So the browser refuses the request and the console sees status 0 --
+       measured exactly that way: a plain POST to /sql returns 400 (reached the
+       server), while the same POST plus these headers returns 0 (blocked).
+       Neon parses the JSON body fine without any Content-Type at all
+       (verified: HTTP 200), and Neon-Connection-String IS on the allow list,
+       so dropping this one line is the whole fix. */
     x.setRequestHeader('Neon-Connection-String', this.dsn);
     x.onreadystatechange = function () {
         if (x.readyState !== 4) return;

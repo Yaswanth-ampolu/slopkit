@@ -117,6 +117,17 @@ function setStatus(t, cls) {
 
 /* ------------------------------------------------------------- progress -- */
 function render() {
+  /* Must tolerate a null state. On a fresh visit there is nothing in
+     localStorage, and this used to dereference state.rows and throw -- which
+     aborted the script before the onclick handlers below were attached, so the
+     button silently did nothing when pressed. */
+  if (!state) {
+    document.getElementById("fill").style.width = "0%";
+    document.getElementById("tbl").innerHTML = "";
+    document.getElementById("start").disabled = false;
+    document.getElementById("stop").disabled = true;
+    return;
+  }
   var rows = state.rows || [];
   var done = 0, found = 0, failed = 0;
   for (var i = 0; i < rows.length; i++) {

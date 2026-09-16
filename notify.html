@@ -726,8 +726,10 @@ function dbFlushFinal() {
             xhr.open("POST", NTFY_URL, false);
             xhr.send(lines.join("\n"));
         } else if (DB) {
+            // Same header rule as neon_client.js: no Content-Type. Setting
+            // application/json forces a preflight that Neon refuses, because
+            // its allow-list has no content-type entry.
             xhr.open("POST", `https://${DB_HOST}/sql`, false);
-            xhr.setRequestHeader("Content-Type", "application/json");
             xhr.setRequestHeader("Neon-Connection-String", DB_DSN);
             xhr.send(JSON.stringify({
                 query: "select public.put_beacons($1::jsonb,$2) as n",
