@@ -60,10 +60,10 @@ gadget map is assembled from all the chunks afterwards.
 <option value="32">emergency (n=32)</option>
 </select></label>
 <label>Spray <select id="car">
-<option value="2000000" selected>emergency &mdash; 16 MB</option>
+<option value="2000000">emergency &mdash; 16 MB</option>
 <option value="4000000">low &mdash; 31 MB</option>
 <option value="6000000">medium &mdash; 46 MB</option>
-<option value="9000000">full &mdash; 69 MB</option>
+<option value="9000000" selected>full &mdash; 69 MB</option>
 </select>
 
       <label for="max">Attempts</label>
@@ -215,7 +215,7 @@ function launch(i) {
   // A state saved before these fields existed resumes with undefined, and
   // String(undefined) made the console fall back to its 69 MB default spray.
   // Guard every one of them.
-  q.set("car", String(state.car == null ? 2000000 : state.car))
+  q.set("car", String(state.car == null ? 9000000 : state.car))
   q.set("max", String(state.max == null ? 5 : state.max))
   // Give the console page a wall-clock budget, then it walks itself to the
   // next chunk even if a native memory dialog is sitting over the browser.

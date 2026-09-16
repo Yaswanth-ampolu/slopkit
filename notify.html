@@ -513,6 +513,7 @@ try {
 } catch {}
 
 let attemptNumber = priorAttempts + 1;
+let pageRetries = 0;   // retries within THIS page load only
 let seq = 0;
 let keepIndex = 0;
 let stopped = false;
@@ -763,17 +764,6 @@ if (DB_ON || NTFY_ON) window.addEventListener("beforeunload", dbFlushFinal);
 // config; this hands control back when the run ends, however it ends.
 const AUTORUN = Q.get("autorun") || null;
 function autoNext(reason) {
-    // One shot: a deadline firing twice would double-navigate.
-    if (window.__deadlineArmed === undefined) {
-        window.__deadlineArmed = true;
-        if (DEADLINE_MS > 0) {
-            setTimeout(function () {
-                mark("DEADLINE-HIT", `ms=${DEADLINE_MS}-navigating=1`);
-                if (typeof dbFlushFinal === "function") { try { dbFlushFinal(); } catch (e) {} }
-                autoNext("deadline");
-            }, DEADLINE_MS);
-        }
-    }
     if (!AUTORUN) return;
     dbFlush();                       // get the last batch out before navigating
     setTimeout(function () {
@@ -1007,13 +997,20 @@ function scheduleSafeRetry(reason) {
         failed();
         return;
     }
-    if (MAX_ATTEMPTS && attemptNumber >= MAX_ATTEMPTS) {
-        mark("ATTEMPT-CEILING", `reason=${reason}-max=${MAX_ATTEMPTS}`);
+    // MAX_ATTEMPTS is "how many times may THIS page retry", not a lifetime
+    // total. It was compared against attemptNumber, which persists in
+    // sessionStorage across page loads -- so after the counter passed 5 the
+    // ceiling fired immediately, every time, and stayed fired. Observed at
+    // attempt 134 with max=5.
+    if (MAX_ATTEMPTS && pageRetries >= MAX_ATTEMPTS) {
+        mark("ATTEMPT-CEILING", `reason=${reason}-max=${MAX_ATTEMPTS}`
+            + `-page-retries=${pageRetries}-total=${attemptNumber}`);
         failed();
         return;
     }
 
     retryScheduled = true;
+    pageRetries++;
     const nextAttempt = attemptNumber + 1;
     mark("AUTO-RETRY-SCHEDULED", `reason=${reason}`
         + `-next-attempt=${nextAttempt}`
@@ -1184,6 +1181,22 @@ function startAttempt() {
     if (stopped)
         return;
     resetAttemptState();
+    // Arm the wall-clock deadline HERE, not in autoNext(). autoNext only runs
+    // when the run finishes, so arming it there meant a page that hung -- the
+    // whole reason the timer exists -- never armed it at all. That is why
+    // DEADLINE-HIT never appeared in any log while the dialog kept blocking.
+    if (window.__deadlineArmed === undefined && DEADLINE_MS > 0) {
+        window.__deadlineArmed = true;
+        setTimeout(function () {
+            mark("DEADLINE-HIT", `ms=${DEADLINE_MS}-navigating=1`);
+            try { if (typeof dbFlushFinal === "function") dbFlushFinal(); } catch (e) {}
+            autoNext("deadline");
+            // autoNext() is a no-op without ?autorun=, so leave anyway.
+            setTimeout(function () {
+                location.href = "autorun.html?done=0&why=deadline";
+            }, 400);
+        }, DEADLINE_MS);
+    }
     showStatus(`RUNNING  attempt ${attemptNumber}`, "run");
     try {
         sessionStorage.setItem(attemptKey, String(attemptNumber));
