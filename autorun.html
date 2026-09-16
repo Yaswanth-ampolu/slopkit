@@ -25,7 +25,7 @@ td.m{font-family:Consolas,monospace;font-size:14px}
 </style>
 </head>
 <body>
-<div id="buildbadge" style="position:fixed;top:0;right:0;z-index:2147483647;background:#0a7d00;color:#fff;font:700 13px/1 monospace;padding:6px 10px;border-bottom-left-radius:6px;pointer-events:none">DRIVER b8</div>
+<div id="buildbadge" style="position:fixed;top:0;right:0;z-index:2147483647;background:#0a7d00;color:#fff;font:700 13px/1 monospace;padding:6px 10px;border-bottom-left-radius:6px;pointer-events:none">DRIVER b9</div>
 <div id="box">
 <a class="linkbtn" href="notify-launcher.html">&larr; Launcher</a>
 <a class="linkbtn" href="guide.html">Field guide</a>
@@ -78,19 +78,7 @@ gadget map is assembled from all the chunks afterwards.
       </select></label>
 </p>
 <div class="card" style="border-color:#7a4a12">
-<b>Spray is the one that matters for &ldquo;not enough free system memory&rdquo;.</b>
-The proof-of-concept allocates a large array before it does anything else, and
-the default is <b>9,000,000 slots = 69 MB</b> in a single page. That allocation
-is what the console refuses. It is unrelated to the scan size. The upstream
-code documents <code>car=2000000</code> as <i>&ldquo;emergency mode &hellip; for
-consoles too starved for the full array&rdquo;</i> &mdash; which is this console.
-<b>Start at 16 MB.</b>
-</div>
-<p>
-<button id="start">Start the run</button>
-<button id="stop" disabled>Stop</button>
-<button id="reset">Reset</button>
-</p>
+<b>Spray</b> is the only field that matters for the "not enough free system memory" panel. Coverage is plain arithmetic: <code>sourceCovered = fakeChars*2 &lt;= carrierBytes</code>, and this console measured <code>fakeChars = 924176</code> &mdash; so <b>1.85 MB is the real requirement</b>. The old default asked for 69 MB, 39x more than needed, and that over-allocation is what the console refused. It is unrelated to the scan size. <b>Start at 7.6 MB.</b> Do not raise it unless <code>source-covered=false</code> appears in the log. 16 MB and above cover the source too, but only provoke the dialog sooner.</p>
 
 <div class="bar"><i id="fill" style="width:0%"></i></div>
 <div id="status">idle</div>
@@ -102,8 +90,8 @@ consoles too starved for the full array&rdquo;</i> &mdash; which is this console
 /* The queue lives in localStorage because every chunk is a separate page load:
    notify.html navigates back here with ?done=<index> when the chunk ends,
    however it ends. Nothing survives in memory between chunks. */
-var BUILD = "b8";
-var LS = "slopkit.autorun.v3";
+var BUILD = "b9";
+var LS = "slopkit.autorun.v4";
 var state = null;
 
 function save() { try { localStorage.setItem(LS, JSON.stringify(state)); } catch (e) {} }
