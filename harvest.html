@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PS5 Sweep Harvester</title>
+<style>
+html,body{margin:0;min-height:100%;background:#0c0c0f;color:#ccc;font-family:Arial,sans-serif}
+body{display:flex;flex-direction:column;align-items:center;padding:18px 12px}
+#box{max-width:860px;width:100%;background:#141419;border:1px solid #2a2a2e;border-radius:10px;padding:16px}
+h1{font-size:21px;color:#fff;margin:0 0 6px}
+h2{font-size:15px;color:#9fb1c3;margin:16px 0 6px;letter-spacing:.5px}
+p{font-size:14px;line-height:1.5}
+.linkbtn,button{font-size:15px;padding:7px 12px;margin:4px 4px 4px 0;border-radius:6px;
+  background:#223146;color:#cfe3ff;border:2px solid #5e81ac;cursor:pointer;text-decoration:none;display:inline-block}
+button:disabled{opacity:.4;cursor:default}
+input,select{font-size:15px;padding:7px 9px;border-radius:6px;border:1px solid #333;background:#0d0d11;color:#ccc}
+pre{font-family:Consolas,monospace;font-size:12.5px;line-height:1.45;background:#0a0a0d;
+  border:1px solid #222;border-radius:6px;padding:10px;max-height:420px;overflow:auto;white-space:pre;margin:0}
+#status{font-family:Consolas,monospace;font-size:12.5px;color:#8fa1b3;white-space:pre-wrap;margin:8px 0}
+.ok{color:#16c60c}.err{color:#e74856}.warn{color:#e5a00d}
+table{border-collapse:collapse;font-size:13px;margin:6px 0}
+td{padding:2px 14px 2px 0;color:#8fa1b3;vertical-align:top}
+.grid{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<div id="box">
+<p><a class="linkbtn" href="notify-launcher.html">&larr; Launcher</a></p>
+<h1>Sweep Harvester</h1>
+<p>Reads the findings your console already uploaded and builds the two tables
+<code>13.60.js</code> currently leaves empty &mdash; <code>wk_gadgetmap</code> and
+<code>syscall_map</code>. All in this page. No PC tooling, no Python.</p>
+
+<div class="grid">
+  <label>stream <input id="stream" size="18" value="notify-1360"></label>
+  <button id="load">Load findings</button>
+  <button id="save" disabled>Download offsets</button>
+  <button id="copy" disabled>Copy</button>
+</div>
+<div id="status">idle</div>
+
+<h2>Coverage</h2>
+<div id="cov">&mdash;</div>
+
+<h2>Generated</h2>
+<pre id="code">(nothing loaded yet)</pre>
+</div>
+
+<script src="neon_client.js"></script>
+<script>
+"use strict";
+
+/* Same credential as notify.html -- see the warning there. */
+var NEON_HOST = "ep-bitter-breeze-b41m27ic-pooler.c-6.us-east-2.aws.neon.tech";
+var NEON_DSN  = "postgresql://neondb_owner:npg_fKnZ7gMLFI2i@" + NEON_HOST
+              + "/neondb?sslmode=require";
+var R = new NeonRelay(NEON_HOST, NEON_DSN);
+
+/* mark() builds  a<attempt>-r<nav>-s<seq>-note-<TAG>-<extra>.  The tag is not
+   self-delimiting (SCAN-PEEK vs SCAN-PEEK-DONE), so match longest-first rather
+   than guessing where it ends. */
+var TAGS = ["SCAN-PEEK-DONE","SCAN-WPEEK-DONE","SCAN-WMAP-DONE","SCAN-PROBE-DONE",
+  "SCAN-TASKA-DONE","AUTO-RETRY-NOT-SCHEDULED","AUTO-RETRY-AFTER-FAILURE",
+  "AUTO-RETRY-CANCELLED","AUTO-RETRY-SCHEDULED","ATTEMPT-CEILING","SCAN-NOBASE",
+  "SCAN-GADGET","SCAN-SYSCALL","SCAN-MISSING","SCAN-START","SCAN-RANGE",
+  "SCAN-PROBE","SCAN-WMAP","SCAN-PEEK","SCAN-WPEEK","SCAN-COVER","SCAN-DONE",
+  "SCAN-PG","DB-SUMMARY","ATTEMPT-START","SSV-BUILD"
+].sort(function (a, b) { return b.length - a.length; });
+
+var LINE_RE = /^a\d+-r[0-9a-z]+-s\d+-note-/;
+
+function splitLine(line) {
+  var m = LINE_RE.exec(line);
+  if (!m) return [null, null];
+  var rest = line.slice(m[0].length);
+  for (var i = 0; i < TAGS.length; i++) {
+    var t = TAGS[i];
+    if (rest === t) return [t, ""];
+    if (rest.indexOf(t + "-") === 0) return [t, rest.slice(t.length + 1)];
+  }
+  return [null, rest];
+}
+
+function parseGadget(extra) {
+  var m = /^(.*)-rva=0x([0-9a-fA-F]+)$/.exec(extra);
+  return m ? [m[1], parseInt(m[2], 16)] : [null, null];
+}
+function parseSyscall(extra) {
+  var n = /\bn=0x([0-9a-fA-F]+)/.exec(extra);
+  var r = /\brva=0x([0-9a-fA-F]+)/.exec(extra);
+  if (!n || !r) return null;
+  return [parseInt(n[1], 16), parseInt(r[1], 16)];
+}
+
+function collect(lines) {
+  var gadgets = {}, gOrder = [], syscalls = {}, missing = [], done = null;
+  var attempts = {}, conflicts = {};
+  for (var i = 0; i < lines.length; i++) {
+    var sp = splitLine(lines[i]); var tag = sp[0], extra = sp[1];
+    if (tag === null) continue;
+    attempts[lines[i].split("-")[0]] = 1;
+    if (tag === "SCAN-GADGET") {
+      var g = parseGadget(extra);
+      if (g[0] !== null) {
+        if (!(g[0] in gadgets)) { gadgets[g[0]] = g[1]; gOrder.push(g[0]); }
+        else if (gadgets[g[0]] !== g[1]) {
+          (conflicts[g[0]] = conflicts[g[0]] || {})[g[1]] = 1;
+        }
+      }
+    } else if (tag === "SCAN-SYSCALL") {
+      var s = parseSyscall(extra);
+      if (s && !(s[0] in syscalls)) syscalls[s[0]] = s[1];
+    } else if (tag === "SCAN-MISSING") {
+      missing.push(extra.trim());
+    } else if (tag === "SCAN-DONE") {
+      done = extra;
+    }
+  }
+  var at = [];
+  for (var k in attempts) at.push(k);
+  return { gadgets: gadgets, gOrder: gOrder, syscalls: syscalls,
+           missing: missing, done: done, attempts: at.sort(),
+           conflicts: conflicts, count: lines.length };
+}
+
+function hex8(v) {
+  var s = v.toString(16).toUpperCase();
+  while (s.length < 8) s = "0" + s;
+  return "0x" + s;
+}
+function hex3(v) {
+  var s = v.toString(16).toUpperCase();
+  while (s.length < 3) s = "0" + s;
+  return "0x" + s;
+}
+
+function build(ctx, res) {
+  var L = [];
+  L.push("// " + ctx + " gadget map -- scanned ON CONSOLE, harvested in-browser.");
+  L.push("// " + res.count + " beacons, attempts " + (res.attempts.join(", ") || "-"));
+  if (res.done) L.push("// sweep reported: " + res.done);
+  if (res.missing.length) {
+    L.push("//");
+    L.push("// INCOMPLETE: " + res.missing.length + " gadget(s) never found.");
+    L.push("//   " + res.missing.join(", "));
+  }
+  var ck = [];
+  for (var c in res.conflicts) ck.push(c);
+  if (ck.length) L.push("// WARNING unstable RVAs: " + ck.join(", "));
+  L.push("");
+  L.push("let wk_gadgetmap = {");
+  var w = 8;
+  for (var i = 0; i < res.gOrder.length; i++) {
+    w = Math.max(w, ('"' + res.gOrder[i] + '"').length);
+  }
+  for (var j = 0; j < res.gOrder.length; j++) {
+    var nm = '"' + res.gOrder[j] + '":';
+    var pad = nm;
+    while (pad.length < w + 2) pad += " ";
+    L.push("    " + pad + " " + hex8(res.gadgets[res.gOrder[j]])
+           + (j < res.gOrder.length - 1 ? "," : ""));
+  }
+  L.push("};");
+  L.push("");
+  L.push("let syscall_map = {");
+  var nums = Object.keys(res.syscalls).map(Number).sort(function (a, b) { return a - b; });
+  for (var k = 0; k < nums.length; k += 4) {
+    var parts = [];
+    for (var q = k; q < Math.min(k + 4, nums.length); q++) {
+      parts.push(hex3(nums[q]) + ": " + hex8(res.syscalls[nums[q]]) + ",");
+    }
+    L.push("    " + parts.join(" "));
+  }
+  L.push("};");
+  L.push("");
+  return L.join("\n");
+}
+
+var statusEl = document.getElementById("status");
+var covEl = document.getElementById("cov");
+var codeEl = document.getElementById("code");
+var saveEl = document.getElementById("save");
+var copyEl = document.getElementById("copy");
+var LAST = null, LASTNAME = "offsets.scanned.js";
+
+function say(t, cls) { statusEl.innerHTML = '<span class="' + (cls || "") + '">' + t + "</span>"; }
+
+document.getElementById("load").onclick = function () {
+  var stream = (document.getElementById("stream").value || "").trim();
+  say("querying relay.beacon for " + stream + " ...");
+  R.sql("select line from relay.beacon where stream ilike $1 order by id",
+        ["%" + stream + "%"], function (res) {
+    var rows = (res.rows || []).map(function (r) { return r.line; });
+    if (!rows.length) {
+      say("no beacons for " + stream + ". Run the sweep with 'Send findings to "
+          + "database' ticked.", "warn");
+      covEl.innerHTML = "&mdash;"; codeEl.textContent = "(nothing)";
+      saveEl.disabled = copyEl.disabled = true;
+      return;
+    }
+    var r = collect(rows);
+    var ng = r.gOrder.length, ns = Object.keys(r.syscalls).length;
+    say("loaded " + rows.length + " beacons", "ok");
+
+    var ck = []; for (var c in r.conflicts) ck.push(c);
+    covEl.innerHTML =
+      "<table>"
+      + "<tr><td>beacons</td><td><b>" + rows.length + "</b></td></tr>"
+      + "<tr><td>attempts</td><td><b>" + (r.attempts.join(", ") || "-") + "</b></td></tr>"
+      + "<tr><td>SCAN-DONE</td><td>" + (r.done
+          ? '<b class="ok">' + r.done + "</b>"
+          : '<b class="warn">sweep did not finish</b>') + "</td></tr>"
+      + "<tr><td>gadgets</td><td><b>" + ng + "</b> found, "
+          + (r.missing.length ? '<b class="err">' + r.missing.length + " missing</b>"
+                              : '<b class="ok">0 missing</b>') + "</td></tr>"
+      + "<tr><td>syscalls</td><td><b>" + ns + "</b></td></tr>"
+      + (r.missing.length
+          ? "<tr><td>missing</td><td class=\"err\">" + r.missing.join(", ")
+            + " &mdash; rescan with a larger &amp;scanmb=</td></tr>" : "")
+      + (ck.length
+          ? "<tr><td>unstable</td><td class=\"err\">" + ck.join(", ")
+            + " (differed across attempts)</td></tr>" : "")
+      + "</table>";
+
+    if (!ng) {
+      say("no SCAN-GADGET lines -- did the sweep reach the gadget stage?", "warn");
+      codeEl.textContent = "(no gadgets)";
+      saveEl.disabled = copyEl.disabled = true;
+      return;
+    }
+    LASTNAME = "offsets-" + stream.replace(/[^0-9a-zA-Z]/g, "") + ".js";
+    LAST = build(stream, r);
+    codeEl.textContent = LAST;
+    saveEl.disabled = copyEl.disabled = false;
+  }, function (e) {
+    say("query FAILED " + e.status + " " + (e.body || ""), "err");
+  });
+};
+
+document.getElementById("copy").onclick = function () {
+  if (!LAST) return;
+  var done = function () { say("copied " + LAST.length + " bytes to clipboard", "ok"); };
+  try { navigator.clipboard.writeText(LAST).then(done, function () {
+    say("clipboard blocked; select the text manually", "warn"); }); }
+  catch (e) {
+    var ta = document.createElement("textarea");
+    ta.value = LAST; document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); done(); } catch (x) { say("copy failed", "err"); }
+    document.body.removeChild(ta);
+  }
+};
+
+document.getElementById("save").onclick = function () {
+  if (!LAST) return;
+  var blob = new Blob([LAST], { type: "text/javascript" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = LASTNAME;
+  document.body.appendChild(a); a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  say("downloading " + LASTNAME, "ok");
+};
+</script>
+</body>
+</html>
