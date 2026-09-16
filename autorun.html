@@ -64,7 +64,15 @@ gadget map is assembled from all the chunks afterwards.
 <option value="4000000">low &mdash; 31 MB</option>
 <option value="6000000">medium &mdash; 46 MB</option>
 <option value="9000000">full &mdash; 69 MB</option>
-</select></label>
+</select>
+
+      <label for="max">Attempts</label>
+      <select id="max">
+        <option value="5" selected>5 &mdash; safe (default)</option>
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="0">endless</option>
+      </select></label>
 </p>
 <div class="card" style="border-color:#7a4a12">
 <b>Spray is the one that matters for &ldquo;not enough free system memory&rdquo;.</b>
@@ -202,7 +210,8 @@ function launch(i) {
      page, which is what "There is not enough free system memory" is refusing.
      Upstream calls car=2000000 "emergency mode ... for consoles too starved for
      the full array". */
-  q.set("car", String(state.car));
+  q.set("car", String(state.car))
+  q.set("max", String(state.max == null ? 5 : state.max));
   q.set("autorun", String(i));
   if (state.sink === "ntfy") {
     q.set("sink", "ntfy");
@@ -289,6 +298,7 @@ document.getElementById("start").onclick = function () {
     fw: fw, sink: document.getElementById("sink").value,
     mem: document.getElementById("mem").value,
     car: document.getElementById("car").value,
+    max: (document.getElementById("max") || {value:"5"}).value,
     topic: "ps5slopkit" + fw.replace(/[^0-9]/g, ""),
     rows: rows, index: 0, running: true
   };
