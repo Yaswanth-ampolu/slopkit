@@ -70,7 +70,8 @@ gadget map is assembled from all the chunks afterwards.
 
       <label for="max">Attempts</label>
       <select id="max">
-        <option value="5" selected>5 &mdash; safe (default)</option>
+        <option value="200" selected>200 - the exploit is probabilistic</option>
+        <option value="5">5 &mdash; safe (default)</option>
         <option value="10">10</option>
         <option value="20">20</option>
         <option value="0">endless</option>
@@ -218,7 +219,7 @@ function launch(i) {
   // String(undefined) made the console fall back to its 69 MB default spray.
   // Guard every one of them.
   q.set("car", String(state.car == null ? 1000000 : state.car))
-  q.set("max", String(state.max == null ? 5 : state.max))
+  q.set("max", String(state.max == null ? 200 : state.max))
   // Give the console page a wall-clock budget, then it walks itself to the
   // next chunk even if a native memory dialog is sitting over the browser.
   q.set("deadline", String(state.deadline == null ? 240000 : state.deadline))
