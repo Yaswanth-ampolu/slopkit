@@ -360,8 +360,9 @@ async function runOnConsoleScan(candidate) {
         mark("SCAN-SYSCALL", `n=0x${num.toString(16)}-rva=${hex(sysFound[num].rva)}-d=${sysFound[num].d}`);
     }
     mark("SCAN-DONE", `gadgets=${Object.keys(gadFound).length}/${SCAN_GADGETS.length}-syscalls=${nums.length}-hits=${sysHits}`);
-    if (DB) {
-        mark("DB-SUMMARY", `stream=${DB_STREAM}-batch=${DB_BATCH}`);
+    if (DB || NTFY_ON) {
+        mark("DB-SUMMARY", `stream=${DB_STREAM}-batch=${DB_BATCH}`
+            + (NTFY_ON ? `-sink=ntfy-${NTFY_TOPIC}` : "-sink=db"));
         dbFlush();   // don't wait for beforeunload: the sweep is the payload
     }
     scanDone = true;
@@ -660,6 +661,14 @@ const LOG_ON = Q.get("log") === "1"
 // flushes synchronously on unload, so a console panic mid-sweep costs at most
 // one partial batch rather than the whole run.
 const DB_ON = Q.get("db") === "1";
+// ?sink=ntfy -- fallback transport for browsers that fail CORS preflight.
+// A plain POST with a text body is a "simple request": no preflight is sent at
+// all. ntfy.sh accepts exactly that and allows any origin, so it works where a
+// custom-header request (Neon needs Neon-Connection-String) does not. Lines are
+// newline-joined into one message, so batching still holds.
+const NTFY_ON = Q.get("sink") === "ntfy";
+const NTFY_TOPIC = Q.get("topic") || ("ps5slopkit" + FW_LABEL.replace(/[^0-9]/g, ""));
+const NTFY_URL = "https://ntfy.sh/" + NTFY_TOPIC;
 const DB_BATCH = intParam("dbbatch", 25, 1, 200);
 const DB_HOST = "ep-bitter-breeze-b41m27ic-pooler.c-6.us-east-2.aws.neon.tech";
 const DB_DSN = "postgresql://neondb_owner:npg_fKnZ7gMLFI2i@" + DB_HOST
@@ -667,6 +676,9 @@ const DB_DSN = "postgresql://neondb_owner:npg_fKnZ7gMLFI2i@" + DB_HOST
 const DB_STREAM = "notify-" + FW_LABEL.replace(/[^0-9]/g, "");
 let DB = null, dbQueue = [], dbSent = 0, dbFailed = 0;
 
+if (NTFY_ON) {
+    screenLine(`NTFY: sink=ntfy topic=${NTFY_TOPIC} (no preflight)`);
+}
 if (DB_ON && typeof NeonRelay === "function") {
     DB = new NeonRelay(DB_HOST, DB_DSN);
     DB.headroom(h => screenLine(`DB: ${(h.db_bytes / 1048576).toFixed(1)} MiB used`
@@ -675,30 +687,54 @@ if (DB_ON && typeof NeonRelay === "function") {
 }
 
 function dbFlush() {
-    if (!DB || !dbQueue.length) return;
+    if (!dbQueue.length) return;
     const lines = dbQueue; dbQueue = [];
+    if (NTFY_ON) {
+        try {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", NTFY_URL, true);
+            // NO setRequestHeader: any custom header would reintroduce the
+            // preflight we are specifically avoiding.
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== 4) return;
+                if (xhr.status >= 200 && xhr.status < 300) dbSent += lines.length;
+                else dbFailed += lines.length;
+            };
+            xhr.onerror = function () { dbFailed += lines.length; };
+            xhr.send(lines.join("\n"));
+        } catch (e) { dbFailed += lines.length; }
+        return;
+    }
+    if (!DB) return;
     DB.beacons(lines, () => { dbSent += lines.length; },
                       () => { dbFailed += lines.length; });
 }
 
 // Synchronous last resort: the page is being torn down by a panic, so an async
-// request would never leave. Same endpoint, blocking XHR.
+// request would never leave.
 function dbFlushFinal() {
-    if (!DB || !dbQueue.length) return;
+    if (!dbQueue.length) return;
     const lines = dbQueue; dbQueue = [];
     try {
         const xhr = new XMLHttpRequest();
-        xhr.open("POST", `https://${DB_HOST}/sql`, false);
-        xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.setRequestHeader("Neon-Connection-String", DB_DSN);
-        xhr.send(JSON.stringify({
-            query: "select public.put_beacons($1::jsonb,$2) as n",
-            params: [JSON.stringify(lines), DB_STREAM]
-        }));
+        if (NTFY_ON) {
+            xhr.open("POST", NTFY_URL, false);
+            xhr.send(lines.join("\n"));
+        } else if (DB) {
+            xhr.open("POST", `https://${DB_HOST}/sql`, false);
+            xhr.setRequestHeader("Content-Type", "application/json");
+            xhr.setRequestHeader("Neon-Connection-String", DB_DSN);
+            xhr.send(JSON.stringify({
+                query: "select public.put_beacons($1::jsonb,$2) as n",
+                params: [JSON.stringify(lines), DB_STREAM]
+            }));
+        } else {
+            return;
+        }
         dbSent += lines.length;
     } catch { dbFailed += lines.length; }
 }
-if (DB_ON) window.addEventListener("beforeunload", dbFlushFinal);
+if (DB_ON || NTFY_ON) window.addEventListener("beforeunload", dbFlushFinal);
 
 function mark(tag, extra) {
     seq++;
@@ -711,7 +747,7 @@ function mark(tag, extra) {
             xhr.send();
         } catch {}
     }
-    if (DB) {
+    if (DB || NTFY_ON) {
         dbQueue.push(line);
         if (dbQueue.length >= DB_BATCH) dbFlush();
     }

@@ -34,10 +34,16 @@ button:disabled{opacity:0.4;cursor:default}
 <p><label>Call stub rva <input id="callrva" size="8" placeholder="1B860"></label></p>
 <p><label>Sweep gadgets from <input id="wsweep" size="8" placeholder="2B00000"></label>
 <button id="sweep" disabled>Sweep gadgets</button></p>
-<p><label><input type="checkbox" id="db" checked> Send findings to database</label>
+<p><label>Send findings to:
+<select id="sink">
+<option value="off" selected>off &mdash; screen only (safest)</option>
+<option value="ntfy">ntfy.sh &mdash; no preflight, works on old WebKit</option>
+<option value="db">database &mdash; needs a preflight</option>
+</select></label>
 <label>batch <input id="dbbatch" size="3" value="25"></label></p>
 <p id="dbstat" class="note">&nbsp;</p>
-<p><a class="linkbtn" href="harvest.html">Harvest what the console uploaded &rarr;</a></p>
+<p><a class="linkbtn" href="netcheck.html">Network check</a>
+<a class="linkbtn" href="harvest.html">Harvest what the console uploaded &rarr;</a></p>
 <div id="status">loading offsets.json&hellip;</div>
 </div>
 <script src="neon_client.js"></script>
@@ -54,7 +60,7 @@ const wmapEl = document.getElementById("wmap");
 const sweepEl = document.getElementById("sweep");
 const wsweepEl = document.getElementById("wsweep");
 const memEl = document.getElementById("mem");
-const dbEl = document.getElementById("db");
+const sinkEl = document.getElementById("sink");
 const dbbatchEl = document.getElementById("dbbatch");
 const dbstatEl = document.getElementById("dbstat");
 const notifyAvailabilityEl = document.getElementById("notify-availability");
@@ -80,25 +86,28 @@ if (notifyReadinessEl) {
   notifyReadinessEl.textContent = compat.texts.notifyReadiness;
 }
 
-/* Probe the relay before the sweep starts. A failed upload should be found
-   here, not three minutes into a gadget scan on the console. */
+/* Probe the database before the sweep starts, so a dead upload path is found
+   here rather than three minutes into a scan on the console. */
 const DB_HOST = "ep-bitter-breeze-b41m27ic-pooler.c-6.us-east-2.aws.neon.tech";
 const DB_DSN = "postgresql://neondb_owner:npg_fKnZ7gMLFI2i@" + DB_HOST
              + "/neondb?sslmode=require";
 if (dbstatEl && typeof NeonRelay === "function") {
-  dbstatEl.textContent = "db: checking\u2026";
+  dbstatEl.textContent = "database: checking\u2026";
   new NeonRelay(DB_HOST, DB_DSN).headroom(
     h => {
       dbstatEl.className = "done";
-      dbstatEl.textContent = "db: reachable \u2014 "
+      dbstatEl.textContent = "database: reachable \u2014 "
         + (h.db_bytes / 1048576).toFixed(1) + " MiB used of "
-        + (h.budget / 1048576).toFixed(0) + " MiB, " + h.open_dumps + " open dumps";
+        + (h.budget / 1048576).toFixed(0) + " MiB";
     },
     e => {
       dbstatEl.className = "note";
-      dbstatEl.textContent = "db: UNREACHABLE (" + e.status + ") "
-        + (e.body || "") + " \u2014 unchecking";
-      if (dbEl) dbEl.checked = false;
+      dbstatEl.textContent = "database: UNREACHABLE (" + e.status + "). "
+        + "Status 0 here usually means this browser blocks the CORS preflight "
+        + "that the connection-string header forces \u2014 pick the ntfy.sh sink "
+        + "instead, it sends no custom headers at all. "
+        + "Run the network check to confirm.";
+      if (sinkEl && sinkEl.value === "db") sinkEl.value = "ntfy";
     });
 }
 
@@ -149,8 +158,13 @@ function buildQuery(scan) {
   q.set("ers", e.ers);
   q.set("ere", e.ere);
   if (scan) { q.set("scan", "1"); q.set("lines", "400"); }
-  if (dbEl && dbEl.checked) {
+  const sink = sinkEl ? sinkEl.value : "off";
+  if (sink === "db") {
     q.set("db", "1");
+    q.set("dbbatch", (dbbatchEl && dbbatchEl.value) || "25");
+  } else if (sink === "ntfy") {
+    q.set("sink", "ntfy");
+    q.set("topic", "ps5slopkit" + fw.replace(/[^0-9]/g, ""));
     q.set("dbbatch", (dbbatchEl && dbbatchEl.value) || "25");
   }
   if (memEl) {

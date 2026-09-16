@@ -34,7 +34,11 @@ td{padding:2px 14px 2px 0;color:#8fa1b3;vertical-align:top}
 <code>syscall_map</code>. All in this page. No PC tooling, no Python.</p>
 
 <div class="grid">
-  <label>stream <input id="stream" size="18" value="notify-1360"></label>
+  <label>source <select id="src">
+    <option value="ntfy">ntfy.sh (no preflight)</option>
+    <option value="db">database</option>
+  </select></label>
+  <label>topic / stream <input id="stream" size="18" value="ps5slopkit1360"></label>
   <button id="load">Load findings</button>
   <button id="save" disabled>Download offsets</button>
   <button id="copy" disabled>Copy</button>
@@ -120,9 +124,32 @@ function collect(lines) {
   }
   var at = [];
   for (var k in attempts) at.push(k);
+
+  /* Transport integrity. mark() stamps a monotonic seq per page load, so a
+     hole in that sequence means the sink dropped a batch in flight -- which
+     would otherwise show up only as a gadget mysteriously "not found". */
+  var seqRe = /^(a\d+-r[0-9a-z]+)-s(\d+)-/;
+  var seqs = {}, gaps = {};
+  for (var q = 0; q < lines.length; q++) {
+    var sm = seqRe.exec(lines[q]);
+    if (!sm) continue;
+    if (!seqs[sm[1]]) seqs[sm[1]] = {};
+    seqs[sm[1]][parseInt(sm[2], 10)] = 1;
+  }
+  for (var key in seqs) {
+    var ns = [], n;
+    for (n in seqs[key]) ns.push(parseInt(n, 10));
+    ns.sort(function (a, b) { return a - b; });
+    var miss = [];
+    for (var v = ns[0]; v <= ns[ns.length - 1]; v++) {
+      if (!seqs[key][v]) miss.push(v);
+    }
+    if (miss.length) gaps[key] = miss;
+  }
+
   return { gadgets: gadgets, gOrder: gOrder, syscalls: syscalls,
            missing: missing, done: done, attempts: at.sort(),
-           conflicts: conflicts, count: lines.length };
+           conflicts: conflicts, gaps: gaps, count: lines.length };
 }
 
 function hex8(v) {
@@ -188,56 +215,120 @@ var LAST = null, LASTNAME = "offsets.scanned.js";
 function say(t, cls) { statusEl.innerHTML = '<span class="' + (cls || "") + '">' + t + "</span>"; }
 
 document.getElementById("load").onclick = function () {
-  var stream = (document.getElementById("stream").value || "").trim();
+  var src = document.getElementById("src").value;
+  var key = (document.getElementById("stream").value || "").trim();
+  if (src === "ntfy") loadNtfy(key); else loadDb(key);
+};
+
+/* ntfy is a pub/sub bus, not a database: a poll fired immediately after a
+   publish can come back short because the message has not propagated. A
+   dropped message means silently dropped gadget RVAs, so poll until the count
+   stops growing instead of trusting one shot. */
+function loadNtfy(topic) {
+  say("polling ntfy.sh/" + topic + " ...");
+  var url = "https://ntfy.sh/" + encodeURIComponent(topic) + "/json?poll=1&since=all";
+  var best = [], tries = 0;
+  (function attempt() {
+    tries++;
+    var x = new XMLHttpRequest();
+    x.open("GET", url, true);
+    x.timeout = 20000;
+    x.onreadystatechange = function () {
+      if (x.readyState !== 4) return;
+      if (x.status < 200 || x.status >= 300) {
+        say("ntfy FAILED " + x.status + " — topic wrong, or messages expired "
+            + "(ntfy keeps ~12h)", "err");
+        return;
+      }
+      var msgs = [];
+      var raw = x.responseText.split("\n");
+      for (var i = 0; i < raw.length; i++) {
+        if (!raw[i].trim()) continue;
+        try {
+          var d = JSON.parse(raw[i]);
+          if (d.event === "message" && d.message) msgs.push(d.message);
+        } catch (e) {}
+      }
+      if (msgs.length > best.length) { best = msgs; tries = 0; }
+      if (tries >= 2 || msgs.length === 0) {
+        var lines = [];
+        for (var j = 0; j < best.length; j++) {
+          var parts = best[j].split("\n");
+          for (var k = 0; k < parts.length; k++) if (parts[k].trim()) lines.push(parts[k]);
+        }
+        gotLines(lines, "ntfy:" + topic, best.length + " messages");
+        return;
+      }
+      setTimeout(attempt, 2500);
+    };
+    x.onerror = function () { say("ntfy network error (status 0)", "err"); };
+    x.send();
+  })();
+}
+
+function loadDb(stream) {
   say("querying relay.beacon for " + stream + " ...");
   R.sql("select line from relay.beacon where stream ilike $1 order by id",
         ["%" + stream + "%"], function (res) {
-    var rows = (res.rows || []).map(function (r) { return r.line; });
-    if (!rows.length) {
-      say("no beacons for " + stream + ". Run the sweep with 'Send findings to "
-          + "database' ticked.", "warn");
-      covEl.innerHTML = "&mdash;"; codeEl.textContent = "(nothing)";
-      saveEl.disabled = copyEl.disabled = true;
-      return;
-    }
-    var r = collect(rows);
-    var ng = r.gOrder.length, ns = Object.keys(r.syscalls).length;
-    say("loaded " + rows.length + " beacons", "ok");
-
-    var ck = []; for (var c in r.conflicts) ck.push(c);
-    covEl.innerHTML =
-      "<table>"
-      + "<tr><td>beacons</td><td><b>" + rows.length + "</b></td></tr>"
-      + "<tr><td>attempts</td><td><b>" + (r.attempts.join(", ") || "-") + "</b></td></tr>"
-      + "<tr><td>SCAN-DONE</td><td>" + (r.done
-          ? '<b class="ok">' + r.done + "</b>"
-          : '<b class="warn">sweep did not finish</b>') + "</td></tr>"
-      + "<tr><td>gadgets</td><td><b>" + ng + "</b> found, "
-          + (r.missing.length ? '<b class="err">' + r.missing.length + " missing</b>"
-                              : '<b class="ok">0 missing</b>') + "</td></tr>"
-      + "<tr><td>syscalls</td><td><b>" + ns + "</b></td></tr>"
-      + (r.missing.length
-          ? "<tr><td>missing</td><td class=\"err\">" + r.missing.join(", ")
-            + " &mdash; rescan with a larger &amp;scanmb=</td></tr>" : "")
-      + (ck.length
-          ? "<tr><td>unstable</td><td class=\"err\">" + ck.join(", ")
-            + " (differed across attempts)</td></tr>" : "")
-      + "</table>";
-
-    if (!ng) {
-      say("no SCAN-GADGET lines -- did the sweep reach the gadget stage?", "warn");
-      codeEl.textContent = "(no gadgets)";
-      saveEl.disabled = copyEl.disabled = true;
-      return;
-    }
-    LASTNAME = "offsets-" + stream.replace(/[^0-9a-zA-Z]/g, "") + ".js";
-    LAST = build(stream, r);
-    codeEl.textContent = LAST;
-    saveEl.disabled = copyEl.disabled = false;
+    gotLines((res.rows || []).map(function (r) { return r.line; }),
+             "db:" + stream, (res.rows || []).length + " beacons");
   }, function (e) {
-    say("query FAILED " + e.status + " " + (e.body || ""), "err");
+    say("query FAILED " + e.status + " " + (e.body || "") + ". Status 0 means the "
+        + "request never left — almost always the CORS preflight the "
+        + "connection-string header forces. Use the ntfy source.", "err");
   });
-};
+}
+
+function gotLines(rows, label, summary) {
+  if (!rows.length) {
+    say("nothing found for " + label + ". Run the sweep with that sink selected.", "warn");
+    covEl.innerHTML = "&mdash;"; codeEl.textContent = "(nothing)";
+    saveEl.disabled = copyEl.disabled = true;
+    return;
+  }
+  var r = collect(rows);
+  var ng = r.gOrder.length, ns = 0;
+  for (var k in r.syscalls) ns++;
+  say("loaded " + summary, "ok");
+
+  var ck = []; for (var c in r.conflicts) ck.push(c);
+  var gk = []; for (var g in r.gaps) gk.push(g);
+
+  covEl.innerHTML =
+    "<table>"
+    + "<tr><td>source</td><td><b>" + label + "</b></td></tr>"
+    + "<tr><td>lines</td><td><b>" + rows.length + "</b></td></tr>"
+    + "<tr><td>attempts</td><td><b>" + (r.attempts.join(", ") || "-") + "</b></td></tr>"
+    + "<tr><td>SCAN-DONE</td><td>" + (r.done
+        ? '<b class="ok">' + r.done + "</b>"
+        : '<b class="warn">sweep did not finish</b>') + "</td></tr>"
+    + "<tr><td>gadgets</td><td><b>" + ng + "</b> found, "
+        + (r.missing.length ? '<b class="err">' + r.missing.length + " missing</b>"
+                            : '<b class="ok">0 missing</b>') + "</td></tr>"
+    + "<tr><td>syscalls</td><td><b>" + ns + "</b></td></tr>"
+    + (gk.length
+        ? "<tr><td>DROPPED</td><td class=\"err\">sequence gaps in "
+          + gk.join(", ") + " — the sink lost batches. Reload in a few seconds."
+          + "</td></tr>" : "")
+    + (r.missing.length
+        ? "<tr><td>missing</td><td class=\"err\">" + r.missing.join(", ")
+          + " &mdash; rescan with a larger &amp;scanmb=</td></tr>" : "")
+    + (ck.length
+        ? "<tr><td>unstable</td><td class=\"err\">" + ck.join(", ")
+          + " (differed across attempts)</td></tr>" : "")
+    + "</table>";
+
+  if (!ng) {
+    say("no SCAN-GADGET lines — did the sweep reach the gadget stage?", "warn");
+    codeEl.textContent = "(no gadgets)";
+    saveEl.disabled = copyEl.disabled = true;
+    return;
+  }
+  LASTNAME = "offsets-" + label.replace(/[^0-9a-zA-Z]/g, "") + ".js";
+  LAST = build(label, r);
+  codeEl.textContent = LAST;
+  saveEl.disabled = copyEl.disabled = false;
+}
 
 document.getElementById("copy").onclick = function () {
   if (!LAST) return;

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PS5 Network Check</title>
+<style>
+html,body{margin:0;background:#0c0c0f;color:#ccc;font-family:Arial,sans-serif}
+body{display:flex;flex-direction:column;align-items:center;padding:18px 12px}
+#box{max-width:780px;width:100%;background:#141419;border:1px solid #2a2a2e;border-radius:10px;padding:16px}
+h1{font-size:22px;color:#fff;margin:0 0 6px}
+p{font-size:15px;line-height:1.5}
+.linkbtn,button{font-size:17px;padding:10px 16px;margin:6px 6px 6px 0;border-radius:8px;
+  background:#223146;color:#cfe3ff;border:2px solid #5e81ac;cursor:pointer;text-decoration:none;display:inline-block}
+button:disabled{opacity:.4;cursor:default}
+table{border-collapse:collapse;width:100%;font-size:15px;margin:12px 0}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #26262b;vertical-align:top}
+th{color:#9fb1c3;font-size:13px}
+td.r{font-family:Consolas,monospace;font-size:14px}
+.ok{color:#16c60c}.err{color:#e74856}.warn{color:#e5a00d}.dim{color:#8fa1b3}
+pre{font-family:Consolas,monospace;font-size:12.5px;background:#0a0a0d;border:1px solid #222;
+  border-radius:6px;padding:10px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow:auto}
+</style>
+</head>
+<body>
+<div id="box">
+<a class="linkbtn" href="notify-launcher.html">&larr; Launcher</a>
+<a class="linkbtn" href="guide.html">Field guide</a>
+<h1>PS5 Network Check</h1>
+<p>Runs from the console and finds which endpoints it can actually reach, and
+whether it survives a <b>CORS preflight</b>. A plain request that passes and a
+custom-header request that fails means the preflight is what breaks &mdash; which
+is the usual reason a page loads from github.io but cannot POST anywhere.</p>
+
+<button id="go">Run the check</button>
+<pre id="log">ready</pre>
+
+<h2 style="font-size:17px;color:#fff">Results</h2>
+<div id="out">&mdash;</div>
+</div>
+
+<script>
+"use strict";
+
+var logEl = document.getElementById("log");
+var outEl = document.getElementById("out");
+function log(s) { logEl.textContent += "\n" + s; logEl.scrollTop = logEl.scrollHeight; }
+
+/* Each probe reports the raw XHR status. In a browser you cannot separate DNS
+   from TLS from connect failure -- they all surface as status 0 -- so the
+   signal is the PATTERN across hosts, not any single row. */
+function probe(url, opts, cb) {
+  opts = opts || {};
+  var x = new XMLHttpRequest();
+  var done = false, t0 = Date.now();
+  function finish(status, note) {
+    if (done) return; done = true;
+    cb(status, Math.round(Date.now() - t0), note || "");
+  }
+  try {
+    x.open(opts.method || "GET", url, true);
+    x.timeout = opts.timeout || 15000;
+    if (opts.headers) for (var k in opts.headers) x.setRequestHeader(k, opts.headers[k]);
+    x.onreadystatechange = function () {
+      if (x.readyState !== 4) return;
+      finish(x.status, (x.responseText || "").slice(0, 120).replace(/\s+/g, " "));
+    };
+    x.onerror = function () { finish(0, "network error"); };
+    x.ontimeout = function () { finish(0, "timeout"); };
+    x.send(opts.body === undefined ? null : opts.body);
+  } catch (e) { finish(-1, "throw: " + e.message); }
+}
+
+var NEON = "https://ep-bitter-breeze-b41m27ic-pooler.c-6.us-east-2.aws.neon.tech/sql";
+var DSN = "postgresql://neondb_owner:npg_fKnZ7gMLFI2i@ep-bitter-breeze-b41m27ic-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require";
+var TOPIC = "ps5slopkit1360";
+
+var TESTS = [
+  { name: "github.io (known good)",
+    url: location.origin + "/slopkit/neon_client.js", note: "same-origin baseline" },
+  { name: "ntfy.sh simple GET",
+    url: "https://ntfy.sh/", note: "no preflight, plain GET" },
+  { name: "ntfy.sh simple POST",
+    url: "https://ntfy.sh/" + TOPIC, method: "POST", body: "netcheck-ping",
+    note: "text/plain body = NO preflight" },
+  { name: "ntfy.sh custom header",
+    url: "https://ntfy.sh/" + TOPIC, method: "POST", body: "x",
+    headers: { "X-Title": "t" }, note: "forces a preflight" },
+  { name: "Neon /sql simple POST",
+    url: NEON, method: "POST", body: "x",
+    note: "no auth header; 400 = reached, 0 = blocked" },
+  { name: "Neon /sql custom header",
+    url: NEON, method: "POST", body: JSON.stringify({ query: "select 1", params: [] }),
+    headers: { "Content-Type": "application/json", "Neon-Connection-String": DSN },
+    note: "the real request shape" },
+  { name: "api.telegram.org",
+    url: "https://api.telegram.org/", note: "alternative sink" },
+  { name: "1.1.1.1",
+    url: "https://1.1.1.1/", note: "plain HTTPS baseline" }
+];
+
+document.getElementById("go").onclick = function () {
+  var btn = this; btn.disabled = true;
+  outEl.innerHTML = ""; logEl.textContent = "running " + TESTS.length + " probes...";
+  var rows = [], i = 0;
+
+  (function next() {
+    if (i >= TESTS.length) { render(rows); btn.disabled = false; return; }
+    var t = TESTS[i++];
+    log("\n" + t.name + " ...");
+    probe(t.url, t, function (status, ms, note) {
+      log("  status " + status + "  " + ms + "ms  " + note);
+      rows.push({ t: t, status: status, ms: ms, note: note });
+      next();
+    });
+  })();
+
+  function cls(status) {
+    if (status >= 200 && status < 500) return "ok";     /* reached the server */
+    return "err";                                       /* 0 = never got there */
+  }
+  function render(rows) {
+    var h = "<table><tr><th>probe</th><th>status</th><th>ms</th><th>meaning</th></tr>";
+    var preflightBroken = false, ntfySimple = null, neonSimple = null;
+    for (var j = 0; j < rows.length; j++) {
+      var r = rows[j], st = r.status;
+      var mean = st === 0 ? "BLOCKED / unreachable"
+               : st < 500 ? "reached server" : "server error";
+      h += "<tr><td>" + r.t.name + "</td>"
+         + "<td class='r " + cls(st) + "'>" + st + "</td>"
+         + "<td class='r dim'>" + r.ms + "</td>"
+         + "<td class='" + cls(st) + "'>" + mean + "</td></tr>";
+      if (r.t.name === "ntfy.sh simple POST") ntfySimple = st;
+      if (r.t.name === "ntfy.sh custom header" && st === 0) preflightBroken = true;
+      if (r.t.name === "Neon /sql simple POST") neonSimple = st;
+    }
+    h += "</table>";
+
+    h += "<h2 style='font-size:17px;color:#fff'>Verdict</h2><p>";
+    if (preflightBroken && ntfySimple && ntfySimple < 500) {
+      h += "<b class='warn'>Preflight is broken on this browser.</b> Plain POSTs "
+         + "reach ntfy.sh, but adding any custom header kills the request. "
+         + "That is why the database upload fails: Neon needs a "
+         + "<code>Neon-Connection-String</code> header, which forces a preflight. "
+         + "<b>Use the ntfy sink instead</b> &mdash; it needs no custom headers.";
+    } else if (neonSimple === 0) {
+      h += "<b class='err'>Neon's host is unreachable from this console entirely.</b> "
+         + "Both the plain and header probes failed, so this is not a CORS problem "
+         + "&mdash; the host is being blocked or cannot be resolved. Check your DNS "
+         + "blocking, or use the ntfy sink.";
+    } else if (ntfySimple && ntfySimple < 500) {
+      h += "<b class='ok'>ntfy.sh is reachable.</b> Use it as the export sink.";
+    } else {
+      h += "<b class='err'>Nothing reachable.</b> The console is offline or every "
+         + "outbound host is blocked.";
+    }
+    h += "</p>";
+    outEl.innerHTML = h;
+    log("\ndone.");
+  }
+};
+</script>
+</body>
+</html>
