@@ -74,9 +74,10 @@ you touch anything.</p>
 <a href="#s3">3 &mdash; Set the controls</a>
 <a href="#s4">4 &mdash; Run the sweep</a>
 <a href="#s5">5 &mdash; Read the result</a>
-<a href="#s6">6 &mdash; Harvest (online only)</a>
-<a href="#s7">7 &mdash; Use the file</a>
-<a href="#s8">8 &mdash; Troubleshooting</a>
+<a href="#s6">6 &mdash; Out of memory? Auto Runner</a>
+<a href="#s7">7 &mdash; Harvest (online only)</a>
+<a href="#s8">8 &mdash; Use the file</a>
+<a href="#s9">9 &mdash; Troubleshooting</a>
 </div>
 
 <div class="stop">
@@ -137,12 +138,13 @@ find gadgets.</p>
 <li><code>Run notify proof</code> &middot; <code>Call stub (?call=)</code> &middot; <code>Map readability (?wmap=1)</code></li>
 <li><code>Call stub rva</code> box</li>
 <li><code>Sweep gadgets from</code> box &middot; <code>Sweep gadgets</code> button</li>
-<li><b><code>Send findings to database</code></b> checkbox &middot; <code>batch</code> box</li>
-<li>A status line: <code>db: reachable &mdash; X MiB used of 500 MiB</code></li>
-<li><code>Harvest what the console uploaded &rarr;</code> link</li>
+<li><b><code>Send findings to</code></b> dropdown &middot; <code>batch</code> box</li>
+<li>A status line: <code>database: reachable &mdash; X MiB used of 500 MiB</code></li>
+<li><code>Network check</code> link &middot; <code>Harvest what the console uploaded &rarr;</code> link</li>
 </ul>
-<p>The db status line turns <span class="v">green</span> if the database is
-reachable, <span class="x">red</span> and auto-untickes the box if not.</p>
+<p>The status line turns <span class="v">green</span> if the database is
+reachable. If it turns <span class="x">red</span>, the dropdown switches itself
+to <b>ntfy.sh</b> &mdash; that is the sink that works on this console.</p>
 
 <h2 id="s3"><span class="stepnum">3</span>Set the controls</h2>
 
@@ -157,8 +159,24 @@ then <code>emergency (n=32, full carrier)</code></li>
 <li>Higher <code>n</code> is faster but uses more memory</li>
 </ul>
 
-<h3><code>Send findings to database</code> checkbox</h3>
-<p><b>Untick it</b> for the first run. See step 1.</p>
+<h3><code>Send findings to</code> dropdown</h3>
+<p>Three choices: <code>off</code>, <code>ntfy.sh</code> and
+<code>database</code>.</p>
+<ul>
+<li><b><code>off</code></b> &mdash; nothing leaves the console. Use this if you
+are staying offline. You read results off the screen instead.</li>
+<li><b><code>ntfy.sh</code></b> &mdash; <b>use this one.</b> It sends the
+findings out so they can be collected without photographing anything.</li>
+<li><b><code>database</code></b> &mdash; the original path. It fails on this
+console; leave it alone.</li>
+</ul>
+<div class="card">
+<p style="margin-bottom:0"><b>Why ntfy works when the database does not.</b>
+The database endpoint needs a special authentication header, and a custom
+header makes the browser send a permission request first. ntfy takes a plain
+POST with no special headers, so there is no permission step to fail. Same job,
+one less thing in the way.</p>
+</div>
 
 <h3><code>Sweep gadgets from</code> box</h3>
 <p>Leave the default <code>2B00000</code>.</p>
@@ -217,16 +235,83 @@ that is where the work is.</p>
 &mdash; you can stop here and never go online.</p>
 </div>
 
-<h2 id="s6"><span class="stepnum">6</span>Harvest &mdash; online only</h2>
+<h2 id="s6"><span class="stepnum">6</span>Out of memory? Use the Auto Runner</h2>
+
+<div class="warn">
+<h3>If the notify proof works but everything else dies, this is your fix</h3>
+<p style="margin-bottom:0">That combination has one cause: the sweep is doing
+far too much work in a single page load. The proof needs a handful of reads.
+A full sweep needs tens of thousands.</p>
+</div>
+
+<p><b>Why it happens.</b> A sweep covers a range of WebKit's code, reading it in
+256-byte windows that advance 248 bytes at a time. Covering 8&nbsp;MB that way
+is about <b>33,800 separate carrier reads in one page</b>. The notification
+proof uses a few dozen. So the proof succeeds, and then the tab runs out of
+memory and the console throws a system error &mdash; not because anything is
+broken, but because the scan is simply too large for one run.</p>
+
+<div class="card">
+<p><b>The fix: cut it into chunks.</b> Each chunk is a separate page load, so
+memory starts clean every time. The Auto Runner does this for you and remembers
+where it got to.</p>
+<p style="margin-bottom:0">0.25&nbsp;MB per run is roughly 1,060 reads &mdash;
+small enough to finish.</p>
+</div>
+
+<ol>
+<li><b>Open the Auto Runner</b>
+<a class="linkbtn" href="autorun.html">autorun.html</a></li>
+
+<li><b>Set <code>Chunk MB</code> to <code>0.25</code></b> and
+<code>Cover MB</code> to <code>4</code>. That is 16 short runs rather than one
+run that dies.</li>
+
+<li><b>Leave <code>Sink</code> on <code>ntfy.sh</code></b> and
+<code>Memory</code> on <code>low</code>. If a chunk still dies, drop Memory to
+<code>ultra-low</code> and lower Chunk MB to <code>0.25</code>.</li>
+
+<li><b>Press <code>Start the run</code> and then do nothing.</b> The page walks
+the range on its own: it opens the sweep, waits for the chunk to finish,
+returns, and starts the next one. A progress bar shows how far it has got.</li>
+
+<li><b>If it stops partway</b> &mdash; a crash, or you closed it &mdash; just
+open the Auto Runner again and press <code>Start</code>. It resumes from the
+first unfinished chunk. Nothing already collected is lost.</li>
+
+<li><b>When it finishes</b>, open the
+<a class="linkbtn" href="harvest.html">harvester</a>, set source to
+<code>ntfy.sh</code>, and press <code>Load findings</code>. It stitches every
+chunk into one offset file.</li>
+</ol>
+
+<div class="ok">
+<h3>Why this is safe</h3>
+<p style="margin-bottom:0">Smaller reads are <i>gentler</i> on the console than
+one large sweep, not more dangerous. A crash mid-chunk costs you that chunk
+and nothing else.</p>
+</div>
+
+<h3>If you want to watch it work</h3>
+<p>Run <b>one</b> chunk by hand first, so you can see the lines go by. Set the
+launcher normally, then edit its URL and change <code>scanmb=8</code> to
+<code>scanmb=0.25</code>. If that single small sweep completes and shows
+<code>SCAN-DONE</code>, the Auto Runner will work.</p>
+
+<h2 id="s7"><span class="stepnum">7</span>Harvest &mdash; online only</h2>
 
 <p><b>Skip this entirely if you ran offline.</b></p>
 
 <ol>
-<li>Back on the launcher, <b>tick <code>Send findings to database</code></b></li>
-<li>Click <b><code>Sweep gadgets</code></b> again &mdash; now <code>db=1</code>
-is added and findings batch to the database as they are produced</li>
+<li>Set <b><code>Send findings to</code></b> to <b><code>ntfy.sh</code></b></li>
+<li>Click <b><code>Sweep gadgets</code></b> again &mdash; the findings now batch
+out to ntfy as they are produced</li>
+<li>If the sweep dies partway, switch to the <b>Auto Runner</b> (step 6)
+instead &mdash; it runs the same scan in chunks that survive</li>
 <li>When it finishes, click <b><code>Harvest what the console uploaded &rarr;</code></b></li>
-<li>Leave the <code>stream</code> box at <code>notify-1360</code></li>
+<li>Set <code>source</code> to <b><code>ntfy.sh</code></b></li>
+<li>Set <code>topic / stream</code> to <b><code>ps5slopkit1360</code></b>
+&mdash; this is the topic name, not the old stream name</li>
 <li>Click <b><code>Load findings</code></b></li>
 </ol>
 
@@ -245,7 +330,7 @@ is added and findings batch to the database as they are produced</li>
 <pre>let wk_gadgetmap = { "ret": 0x&hellip;, "pop rdi": 0x&hellip;, &hellip; };
 let syscall_map  = { 0x001: 0x&hellip;, 0x02A: 0x&hellip; };</pre>
 
-<h2 id="s7"><span class="stepnum">7</span>Use the file</h2>
+<h2 id="s8"><span class="stepnum">8</span>Use the file</h2>
 
 <p>It fills the two tables <code>13.60.js</code> currently leaves empty:</p>
 
@@ -257,17 +342,35 @@ let syscall_map = {};</pre>
 <code>FW13_60_RAW</code> block above them</b> &mdash; it holds the host-constructor
 candidates and the notify offset, which the sweep does not produce.</p>
 
-<h2 id="s8"><span class="stepnum">8</span>Troubleshooting</h2>
+<h2 id="s9"><span class="stepnum">9</span>Troubleshooting</h2>
 
 <table>
 <tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
 <tr><td><code>SCAN-NOBASE</code></td><td>notify proof never armed</td><td>The real wall. <code>FW13_60_RAW</code> offsets are wrong.</td></tr>
+<tr><td>Proof works, sweep dies</td><td>too many reads in one run</td><td><b>Use the Auto Runner</b> (step 6) with <code>Chunk MB 0.25</code></td></tr>
 <tr><td>Tab crashes, no output</td><td>out of memory</td><td>Set <code>Memory:</code> to <code>ultra-low</code> or <code>emergency</code></td></tr>
+<tr><td>&ldquo;Out of memory&rdquo; text</td><td>same, mid-sweep</td><td>Smaller chunks. Do not raise <code>scanmb</code> past <code>1</code>.</td></tr>
 <tr><td>Kernel panic partway</td><td>bad read</td><td>Reboot, set <code>wstart</code> to <code>0</code>, retry</td></tr>
-<tr><td>Several <code>SCAN-MISSING</code></td><td>window too small</td><td>Edit the URL: raise <code>scanmb</code> to <code>16</code></td></tr>
-<tr><td><code>db: UNREACHABLE</code></td><td>network blocked the endpoint</td><td>Box auto-untickes. Run offline instead.</td></tr>
-<tr><td>Sweep ok, harvest empty</td><td><code>db=1</code> was not set</td><td>Re-run with the checkbox ticked</td></tr>
+<tr><td>Several <code>SCAN-MISSING</code></td><td>range not covered yet</td><td>Finish the Auto Runner, then widen <code>Cover MB</code></td></tr>
+<tr><td><code>db: UNREACHABLE (0)</code></td><td>database endpoint blocked</td><td>Switch sink to <b>ntfy.sh</b>. It sends no custom headers.</td></tr>
+<tr><td>Harvester loads 0 lines</td><td>wrong topic, or nothing sent</td><td>Topic must match <code>ps5slopkit</code> + firmware digits, e.g. <code>ps5slopkit1360</code></td></tr>
+<tr><td>Harvester &ldquo;DROPPED&rdquo; row</td><td>sink lost a batch in flight</td><td>Press <code>Load findings</code> again &mdash; it re-polls until stable</td></tr>
 </table>
+
+<div class="card">
+<p><b>Sending a diagnostic</b></p>
+<p>If something fails and you want it looked at, open
+<a class="linkbtn" href="netcheck.html">netcheck.html</a>, press
+<code>Run the check</code>, then press <code>Send diagnostics</code>. That posts
+the console's firmware, screen, user-agent and the reachability of every
+endpoint to the same topic the sweep uses, so it can be read from anywhere
+without photographing the screen. It is the single most useful thing to send
+when reporting a problem.</p>
+<p style="margin-bottom:0">The check also settles the question of <i>why</i> one
+sink works and another does not: it runs each endpoint twice, once as a plain
+request and once with a custom header, so a difference between the two columns
+points straight at the cause.</p>
+</div>
 
 <hr>
 

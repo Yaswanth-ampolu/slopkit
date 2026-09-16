@@ -95,9 +95,13 @@ const P_ERROR_EXP = hexParam("ere", 0xf340);
 // served via logserver.py). Open with the same 9 firmware params as the
 // proof, plus:  &scan=1&lines=400   (add &scanmb=8 to scan 8MB of .text)
 const SCAN_MODE = Q.get("scan") === "1";
+// Fractional on purpose. A full 8MB sweep is ~33,800 carrier reads in one page
+// load and the tab runs out of memory long before it finishes. Sub-MB chunks
+// let a driver page walk the range across several fresh page loads, each
+// starting from clean memory, instead of dying partway through one big scan.
 const SCAN_MB = (() => {
-    const v = parseInt(Q.get("scanmb") ?? "4", 10);
-    return Number.isFinite(v) ? Math.max(1, Math.min(16, v)) : 4;
+    const v = parseFloat(Q.get("scanmb") ?? "4");
+    return Number.isFinite(v) ? Math.max(0.25, Math.min(16, v)) : 4;
 })();
 const SCAN_WIN = 0x100;    // == rwView.length (carrier window)
 const SCAN_STEP = 0xF8;    // 8-byte overlap so no pattern straddles windows
@@ -365,6 +369,7 @@ async function runOnConsoleScan(candidate) {
             + (NTFY_ON ? `-sink=ntfy-${NTFY_TOPIC}` : "-sink=db"));
         dbFlush();   // don't wait for beforeunload: the sweep is the payload
     }
+    autoNext("scan-done");
     scanDone = true;
 }
 
@@ -735,6 +740,20 @@ function dbFlushFinal() {
     } catch { dbFailed += lines.length; }
 }
 if (DB_ON || NTFY_ON) window.addEventListener("beforeunload", dbFlushFinal);
+
+// ---- autorun: hand control back to the driver when ?autorun=N is set -----
+// Each sweep config is a separate page load, so something has to sequence them.
+// autorun.html keeps the queue in localStorage and reloads this page once per
+// config; this hands control back when the run ends, however it ends.
+const AUTORUN = Q.get("autorun") || null;
+function autoNext(reason) {
+    if (!AUTORUN) return;
+    dbFlush();                       // get the last batch out before navigating
+    setTimeout(function () {
+        location.href = "autorun.html?done=" + encodeURIComponent(AUTORUN)
+                      + "&why=" + encodeURIComponent(reason);
+    }, 2000);
+}
 
 function mark(tag, extra) {
     seq++;

@@ -33,6 +33,7 @@ custom-header request that fails means the preflight is what breaks &mdash; whic
 is the usual reason a page loads from github.io but cannot POST anywhere.</p>
 
 <button id="go">Run the check</button>
+<button id="send" disabled>Send diagnostics</button>
 <pre id="log">ready</pre>
 
 <h2 style="font-size:17px;color:#fff">Results</h2>
@@ -157,7 +158,79 @@ document.getElementById("go").onclick = function () {
     h += "</p>";
     outEl.innerHTML = h;
     log("\ndone.");
+    sendEl.disabled = false;
+    LAST = { rows: rows, at: new Date().toISOString() };
   }
+};
+
+/* ------------------------------------------------------------------ send --
+   Posts the whole report to ntfy so it can be read from anywhere. Uses a bare
+   POST with a text body: a CORS simple request, so no preflight is involved --
+   the same reason the ntfy sink works for the sweep when a custom-header sink
+   does not. */
+var sendEl = document.getElementById("send");
+var LAST = null;
+
+function deviceInfo() {
+  var ua = navigator.userAgent || "?";
+  var m = /PlayStation 5\/(\d+\.\d+)/.exec(ua);
+  var fw = m ? (m[1].split(".")[0].padStart(2, "0") + "." + m[1].split(".")[1]) : "unknown";
+  return {
+    ua: ua, fw: fw,
+    screen: (screen.width || 0) + "x" + (screen.height || 0),
+    dpr: window.devicePixelRatio || 1,
+    online: (typeof navigator.onLine === "boolean") ? navigator.onLine : "?",
+    tz: (function () { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; }
+                       catch (e) { return "?"; } })(),
+    lang: navigator.language || "?",
+    /* A page that loaded proves the origin is reachable; that is the baseline
+       every other row is measured against. */
+    origin: location.origin
+  };
+}
+
+sendEl.onclick = function () {
+  var d = deviceInfo();
+  var lines = ["PS5-DIAG-v1"];
+  lines.push("DIAG-fw=" + d.fw);
+  lines.push("DIAG-online=" + d.online);
+  lines.push("DIAG-screen=" + d.screen + "@" + d.dpr + "x");
+  lines.push("DIAG-tz=" + d.tz);
+  lines.push("DIAG-lang=" + d.lang);
+  lines.push("DIAG-origin=" + d.origin);
+  lines.push("DIAG-ua=" + d.ua.slice(0, 180));
+  if (LAST) {
+    lines.push("DIAG-at=" + LAST.at);
+    for (var i = 0; i < LAST.rows.length; i++) {
+      var r = LAST.rows[i];
+      lines.push("DIAG-probe=" + r.t.name.replace(/\s+/g, "_")
+                 + "-status=" + r.status + "-ms=" + r.ms);
+    }
+  } else {
+    lines.push("DIAG-note=check_not_run");
+  }
+  lines.push("PS5-DIAG-END");
+
+  var url = "https://ntfy.sh/" + TOPIC;
+  var x = new XMLHttpRequest();
+  x.open("POST", url, true);
+  x.onreadystatechange = function () {
+    if (x.readyState !== 4) return;
+    if (x.status >= 200 && x.status < 300) {
+      sendEl.textContent = "Sent \u2713";
+      log("\n\ndiagnostics sent to ntfy.sh/" + TOPIC + " (" + lines.length + " lines)");
+    } else {
+      sendEl.textContent = "Send failed (" + x.status + ")";
+      log("\n\nsend failed: " + x.status);
+    }
+  };
+  x.onerror = function () {
+    sendEl.textContent = "Send failed (0)";
+    log("\n\nsend failed: network error 0");
+  };
+  /* Newline-joined, so the reader recovers one line at a time. */
+  x.send(lines.join("\n"));
+  sendEl.textContent = "Sending...";
 };
 </script>
 </body>

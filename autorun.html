@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slopkit Auto Runner</title>
+<style>
+html,body{margin:0;min-height:100%;background:#0c0c0f;color:#ccc;font-family:Arial,sans-serif}
+body{display:flex;flex-direction:column;align-items:center;padding:18px 12px 50px}
+#box{max-width:800px;width:100%;background:#141419;border:1px solid #2a2a2e;border-radius:10px;padding:18px}
+h1{font-size:24px;color:#fff;margin:0 0 6px}
+p{font-size:16px;line-height:1.55}
+.linkbtn,button{font-size:18px;padding:11px 18px;margin:6px 6px 6px 0;border-radius:8px;
+  background:#223146;color:#cfe3ff;border:2px solid #5e81ac;cursor:pointer;text-decoration:none;display:inline-block}
+button:disabled{opacity:.4;cursor:default}
+input,select{font-size:16px;padding:8px 10px;border-radius:6px;border:1px solid #333;background:#0d0d11;color:#ccc}
+table{border-collapse:collapse;width:100%;font-size:15px;margin:12px 0}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid #26262b}
+th{color:#9fb1c3;font-size:13px}
+td.m{font-family:Consolas,monospace;font-size:14px}
+.ok{color:#16c60c}.err{color:#e74856}.warn{color:#e5a00d}.dim{color:#8fa1b3}
+.bar{height:14px;background:#0a0a0d;border:1px solid #2a2a2e;border-radius:8px;overflow:hidden;margin:10px 0}
+.bar>i{display:block;height:100%;background:#5e81ac}
+.card{background:#0a0a0d;border:1px solid #222;border-radius:8px;padding:12px;margin:12px 0;font-size:15px}
+</style>
+</head>
+<body>
+<div id="box">
+<a class="linkbtn" href="notify-launcher.html">&larr; Launcher</a>
+<a class="linkbtn" href="guide.html">Field guide</a>
+<a class="linkbtn" href="harvest.html">Harvester</a>
+
+<h1>Auto Runner</h1>
+<p>One button. Walks the WebKit <code>.text</code> range in <b>small chunks</b>,
+one page load per chunk, and sends every chunk's findings to the sink.</p>
+
+<div class="card">
+<b>Why chunks.</b> A single 8&nbsp;MB sweep is about <b>33,800 carrier reads</b>
+in one page load, and the tab runs out of memory long before it finishes &mdash;
+which is exactly the failure you are hitting. Scanning 0.25&nbsp;MB per run is
+about <b>1,060 reads</b>, then the page reloads and memory starts clean. The
+gadget map is assembled from all the chunks afterwards.
+</div>
+
+<p>
+<label>Firmware <select id="fw"></select></label>
+<label>Chunk MB <input id="chunk" size="5" value="0.25"></label>
+<label>Cover MB <input id="cover" size="5" value="4"></label>
+</p>
+<p>
+<label>Sink <select id="sink">
+<option value="ntfy" selected>ntfy.sh (works here)</option>
+<option value="off">off &mdash; screen only</option>
+<option value="db">database</option>
+</select></label>
+<label>Memory <select id="mem">
+<option value="512">normal (n=512)</option>
+<option value="128" selected>low (n=128)</option>
+<option value="64">ultra-low (n=64)</option>
+<option value="32">emergency (n=32)</option>
+</select></label>
+</p>
+<p>
+<button id="start">Start the run</button>
+<button id="stop" disabled>Stop</button>
+<button id="reset">Reset</button>
+</p>
+
+<div class="bar"><i id="fill" style="width:0%"></i></div>
+<div id="status">idle</div>
+<div id="tbl"></div>
+</div>
+
+<script>
+"use strict";
+/* The queue lives in localStorage because every chunk is a separate page load:
+   notify.html navigates back here with ?done=<index> when the chunk ends,
+   however it ends. Nothing survives in memory between chunks. */
+var LS = "slopkit.autorun.v1";
+var state = null;
+
+function save() { try { localStorage.setItem(LS, JSON.stringify(state)); } catch (e) {} }
+function load() {
+  try { state = JSON.parse(localStorage.getItem(LS) || "null"); } catch (e) { state = null; }
+  return state;
+}
+function clear() { try { localStorage.removeItem(LS); } catch (e) {} state = null; }
+
+function niceMb(v) { return (v < 1 ? v.toFixed(2) : String(v)) + " MB"; }
+function hex(v) { var s = v.toString(16).toUpperCase(); while (s.length < 7) s = "0" + s; return "0x" + s; }
+
+/* ---------------------------------------------------------------- setup -- */
+var fwEl = document.getElementById("fw");
+var DATA = null;
+
+fetch("offsets.json?v=" + Date.now(), { cache: "no-store" })
+  .then(function (r) { return r.json(); })
+  .then(function (d) {
+    DATA = d;
+    Object.keys(d).sort().forEach(function (k) {
+      var o = document.createElement("option");
+      o.value = k; o.textContent = k; fwEl.appendChild(o);
+    });
+    var m = /PlayStation 5\/(\d+\.\d+)/.exec(navigator.userAgent);
+    if (m) {
+      var det = m[1].split(".")[0].padStart(2, "0") + "." + m[1].split(".")[1];
+      if (d[det]) fwEl.value = det;
+    }
+    if (!fwEl.value) fwEl.value = "13.60";
+  })
+  .catch(function (e) { setStatus("offsets.json failed: " + e.message, "err"); });
+
+function setStatus(t, cls) {
+  document.getElementById("status").innerHTML =
+    '<span class="' + (cls || "") + '">' + t + "</span>";
+}
+
+/* ------------------------------------------------------------- progress -- */
+function render() {
+  var rows = state.rows || [];
+  var done = 0, found = 0, failed = 0;
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].st === "done") { done++; found += rows[i].gadgets || 0; }
+    if (rows[i].st === "failed") failed++;
+  }
+  var pct = rows.length ? Math.round((done + failed) / rows.length * 100) : 0;
+  document.getElementById("fill").style.width = pct + "%";
+
+  var h = "<table><tr><th>#</th><th>start</th><th>size</th><th>status</th><th>gadgets</th></tr>";
+  for (var j = 0; j < rows.length; j++) {
+    var r = rows[j];
+    var cls = r.st === "done" ? "ok" : r.st === "failed" ? "err"
+            : r.st === "running" ? "warn" : "dim";
+    h += "<tr><td class='m'>" + (j + 1) + "</td>"
+       + "<td class='m'>" + hex(r.start) + "</td>"
+       + "<td class='m dim'>" + niceMb(r.mb) + "</td>"
+       + "<td class='" + cls + "'>" + r.st + "</td>"
+       + "<td class='m'>" + (r.gadgets === undefined ? "-" : r.gadgets) + "</td></tr>";
+  }
+  h += "</table>";
+  if (rows.length) {
+    h += "<p class='dim'>" + (done + failed) + " of " + rows.length
+       + " chunks finished &middot; " + found + " gadget hits so far can be read on the "
+       + "<a href='harvest.html'>harvester</a> page.</p>";
+  }
+  document.getElementById("tbl").innerHTML = h;
+
+  document.getElementById("start").disabled = !!state.running;
+  document.getElementById("stop").disabled = !state.running;
+}
+
+/* --------------------------------------------------------------- launch -- */
+function launch(i) {
+  var r = state.rows[i];
+  r.st = "running";
+  state.index = i;
+  save();
+  render();
+
+  var e = DATA && DATA[state.fw];
+  if (!e) { setStatus("no offsets for " + state.fw, "err"); state.running = false; save(); return; }
+
+  var q = new URLSearchParams();
+  q.set("go", "1"); q.set("auto", "1"); q.set("fw", state.fw);
+  q.set("hc", (e.hc || []).join(","));
+  q.set("notify", e.nt); q.set("gd", e.gd);
+  q.set("gps", e.gps); q.set("gpe", e.gpe);
+  q.set("cls", e.cls); q.set("cle", e.cle);
+  q.set("ers", e.ers); q.set("ere", e.ere);
+  q.set("scan", "1"); q.set("lines", "400");
+  q.set("notaska", "1");
+  q.set("scanmb", String(r.mb));
+  q.set("wstart", "0x" + r.start.toString(16).toUpperCase());
+  q.set("n", state.mem);
+  q.set("autorun", String(i));
+  if (state.sink === "ntfy") {
+    q.set("sink", "ntfy");
+    q.set("topic", state.topic);
+    q.set("dbbatch", "25");
+  } else if (state.sink === "db") {
+    q.set("db", "1"); q.set("dbbatch", "25");
+  }
+  setStatus("chunk " + (i + 1) + " of " + state.rows.length + " &mdash; "
+            + hex(r.start) + " +" + niceMb(r.mb) + " ... running");
+  location.href = "notify.html?" + q.toString();
+}
+
+/* ------------------------------------------------------------ page load -- */
+var qs = new URLSearchParams(location.search);
+var doneIdx = qs.get("done");
+
+if (load() && doneIdx !== null) {
+  /* Returned from a chunk. Record the outcome and move on. */
+  var i = parseInt(doneIdx, 10);
+  var why = qs.get("why") || "unknown";
+  if (state.rows[i]) {
+    state.rows[i].st = (why === "scan-done") ? "done" : "failed";
+    state.rows[i].why = why;
+  }
+  save();
+  if (state.running && i + 1 < state.rows.length) {
+    setTimeout(function () { launch(i + 1); }, 1200);
+    setStatus("chunk " + (i + 1) + " ended (" + why + ") &mdash; next chunk in 1s...");
+    render();
+  } else {
+    state.running = false; save(); render();
+    setStatus("run finished. Open the harvester to build the offset file.", "ok");
+  }
+} else if (load()) {
+  render();
+  setStatus(state.running ? "run in progress &mdash; click Start to resume"
+                          : "previous run found. Click Start to resume, or Reset.");
+} else {
+  render();
+}
+
+/* --------------------------------------------------------------- buttons - */
+document.getElementById("start").onclick = function () {
+  if (state && state.running) return;
+  var chunk = parseFloat(document.getElementById("chunk").value) || 0.25;
+  var cover = parseFloat(document.getElementById("cover").value) || 4;
+  var fw = fwEl.value;
+  if (!DATA || !DATA[fw]) { setStatus("pick a firmware first", "err"); return; }
+
+  /* Resume an unfinished run; otherwise build a fresh queue. */
+  if (state && state.rows.length && state.fw === fw) {
+    state.running = true; save(); render();
+    var next = 0;
+    for (var i = 0; i < state.rows.length; i++) {
+      if (state.rows[i].st === "pending" || state.rows[i].st === "failed") { next = i; break; }
+    }
+    launch(next);
+    return;
+  }
+
+  var rows = [], total = Math.round(cover / chunk);
+  for (var k = 0; k < total; k++) {
+    rows.push({ start: Math.round(k * chunk * 0x100000), mb: chunk, st: "pending" });
+  }
+  state = {
+    fw: fw, sink: document.getElementById("sink").value,
+    mem: document.getElementById("mem").value,
+    topic: "ps5slopkit" + fw.replace(/[^0-9]/g, ""),
+    rows: rows, index: 0, running: true
+  };
+  save(); render();
+  launch(0);
+};
+
+document.getElementById("stop").onclick = function () {
+  if (!state) return;
+  state.running = false; save(); render();
+  setStatus("stopped. Start resumes from the first unfinished chunk.", "warn");
+};
+
+document.getElementById("reset").onclick = function () {
+  clear(); render(); setStatus("cleared.");
+};
+</script>
+</body>
+</html>
