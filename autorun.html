@@ -219,7 +219,7 @@ function launch(i) {
   q.set("max", String(state.max == null ? 5 : state.max))
   // Give the console page a wall-clock budget, then it walks itself to the
   // next chunk even if a native memory dialog is sitting over the browser.
-  q.set("deadline", String(state.deadline == null ? 90000 : state.deadline))
+  q.set("deadline", String(state.deadline == null ? 240000 : state.deadline))
   q.set("autorun", String(i));
   if (state.sink === "ntfy") {
     q.set("sink", "ntfy");
@@ -307,7 +307,7 @@ document.getElementById("start").onclick = function () {
     mem: (document.getElementById("mem") || {value:"64"}).value,
     car: document.getElementById("car").value,
     max: (document.getElementById("max") || {value:"5"}).value,
-    deadline: 90000,
+    deadline: 240000,   // IDLE budget, refreshed on every mark()
     topic: "ps5slopkit" + fw.replace(/[^0-9]/g, ""),
     rows: rows, index: 0, running: true
   };
@@ -324,7 +324,7 @@ function armWatchdog() {
   if (watchdog) clearInterval(watchdog);
   var seenIndex = state ? state.index : -1;
   var since = Date.now();
-  var budget = ((state && state.deadline) || 90000) + 30000;
+  var budget = ((state && state.deadline) || 240000) + 60000;
   watchdog = setInterval(function () {
     if (!state || !state.running) { clearInterval(watchdog); return; }
     if (state.index !== seenIndex) { seenIndex = state.index; since = Date.now(); return; }

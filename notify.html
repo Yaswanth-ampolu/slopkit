@@ -772,8 +772,46 @@ function autoNext(reason) {
     }, 2000);
 }
 
+// ---------------------------------------------------------------- watchdog --
+// DEADLINE_MS is an IDLE budget, not a wall-clock cap. A gadget sweep over
+// 0.25 MB is ~1057 carrier reads at ~50 ms each -- roughly 53 s of legitimate
+// work per chunk. A fixed 90 s guillotine would chop Task B mid-sweep and look
+// exactly like a hang. So: every mark() refreshes the timer, and only a page
+// that has gone completely silent is treated as stuck.
+let idleTimer = null;
+let lastMarkAt = 0;
+let markCount = 0;
+
+function armIdleDeadline() {
+    if (DEADLINE_MS <= 0) return;
+    kickIdle();
+}
+
+function kickIdle() {
+    if (DEADLINE_MS <= 0) return;
+    lastMarkAt = Date.now();
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(function () {
+        const quiet = Date.now() - lastMarkAt;
+        // Re-check: a late batch may have landed between firing and running.
+        if (quiet < DEADLINE_MS) { kickIdle(); return; }
+        try {
+            mark("DEADLINE-IDLE", `quiet-ms=${quiet}-marks=${markCount}-navigating=1`);
+        } catch (e) {}
+        try { if (typeof dbFlushFinal === "function") dbFlushFinal(); } catch (e) {}
+        autoNext("deadline");
+        setTimeout(function () {
+            location.href = "autorun.html?done="
+                + encodeURIComponent(AUTORUN === null ? "0" : AUTORUN)
+                + "&why=deadline";
+        }, 500);
+    }, DEADLINE_MS);
+}
+
 function mark(tag, extra) {
     seq++;
+    markCount++;
+    kickIdle();
     const line = `a${attemptNumber}-r${navigationID}-s${seq}-note-${tag}`
         + (extra !== undefined ? `-${extra}` : "");
     if (LOG_ON) {
@@ -1185,18 +1223,7 @@ function startAttempt() {
     // when the run finishes, so arming it there meant a page that hung -- the
     // whole reason the timer exists -- never armed it at all. That is why
     // DEADLINE-HIT never appeared in any log while the dialog kept blocking.
-    if (window.__deadlineArmed === undefined && DEADLINE_MS > 0) {
-        window.__deadlineArmed = true;
-        setTimeout(function () {
-            mark("DEADLINE-HIT", `ms=${DEADLINE_MS}-navigating=1`);
-            try { if (typeof dbFlushFinal === "function") dbFlushFinal(); } catch (e) {}
-            autoNext("deadline");
-            // autoNext() is a no-op without ?autorun=, so leave anyway.
-            setTimeout(function () {
-                location.href = "autorun.html?done=0&why=deadline";
-            }, 400);
-        }, DEADLINE_MS);
-    }
+    armIdleDeadline();
     showStatus(`RUNNING  attempt ${attemptNumber}`, "run");
     try {
         sessionStorage.setItem(attemptKey, String(attemptNumber));
