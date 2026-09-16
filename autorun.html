@@ -197,32 +197,44 @@ function launch(i) {
 }
 
 /* ------------------------------------------------------------ page load -- */
-var qs = new URLSearchParams(location.search);
-var doneIdx = qs.get("done");
+/* Wrapped, and deliberately placed BEFORE the handlers are attached. A throw
+   anywhere in here used to abort the script and leave every button dead, which
+   is a terrible failure mode: the page looks fine and simply ignores you. */
+try {
+  var qs = new URLSearchParams(location.search);
+  var doneIdx = qs.get("done");
 
-if (load() && doneIdx !== null) {
-  /* Returned from a chunk. Record the outcome and move on. */
-  var i = parseInt(doneIdx, 10);
-  var why = qs.get("why") || "unknown";
-  if (state.rows[i]) {
-    state.rows[i].st = (why === "scan-done") ? "done" : "failed";
-    state.rows[i].why = why;
-  }
-  save();
-  if (state.running && i + 1 < state.rows.length) {
-    setTimeout(function () { launch(i + 1); }, 1200);
-    setStatus("chunk " + (i + 1) + " ended (" + why + ") &mdash; next chunk in 1s...");
+  if (load() && doneIdx !== null) {
+    /* Returned from a chunk. Record the outcome and move on. */
+    var i = parseInt(doneIdx, 10);
+    var why = qs.get("why") || "unknown";
+    if (state.rows[i]) {
+      state.rows[i].st = (why === "scan-done") ? "done" : "failed";
+      state.rows[i].why = why;
+    }
+    save();
+    if (state.running && i + 1 < state.rows.length) {
+      setTimeout(function () { launch(i + 1); }, 1200);
+      setStatus("chunk " + (i + 1) + " ended (" + why + ") &mdash; next chunk in 1s...");
+      render();
+    } else {
+      state.running = false; save(); render();
+      setStatus("run finished. Open the harvester to build the offset file.", "ok");
+    }
+  } else if (load()) {
     render();
+    setStatus(state.running ? "run in progress &mdash; click Start to resume"
+                            : "previous run found. Click Start to resume, or Reset.");
   } else {
-    state.running = false; save(); render();
-    setStatus("run finished. Open the harvester to build the offset file.", "ok");
+    render();
+    /* Visible proof the handlers are alive. "idle" told the user nothing --
+       the page looked identical whether or not the script had survived. */
+    setStatus("ready &mdash; press <b>Start the run</b> to begin."
+              + (DATA ? "" : " (still loading offsets...)"));
   }
-} else if (load()) {
-  render();
-  setStatus(state.running ? "run in progress &mdash; click Start to resume"
-                          : "previous run found. Click Start to resume, or Reset.");
-} else {
-  render();
+} catch (e) {
+  setStatus("startup error: " + (e && e.message ? e.message : e), "err");
+  try { render(); } catch (e2) {}
 }
 
 /* --------------------------------------------------------------- buttons - */
@@ -231,7 +243,12 @@ document.getElementById("start").onclick = function () {
   var chunk = parseFloat(document.getElementById("chunk").value) || 0.25;
   var cover = parseFloat(document.getElementById("cover").value) || 4;
   var fw = fwEl.value;
-  if (!DATA || !DATA[fw]) { setStatus("pick a firmware first", "err"); return; }
+  if (!DATA) {
+    setStatus("offsets.json has not loaded yet, or failed to load. Wait a "
+              + "moment and press Start again.", "err");
+    return;
+  }
+  if (!DATA[fw]) { setStatus("no offsets for " + fw + " -- pick another firmware", "err"); return; }
 
   /* Resume an unfinished run; otherwise build a fresh queue. */
   if (state && state.rows.length && state.fw === fw) {
