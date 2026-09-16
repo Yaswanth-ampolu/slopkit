@@ -27,7 +27,8 @@ button:disabled{opacity:0.4;cursor:default}
 <p class="done" id="notify-availability"></p>
 <p class="note" id="notify-readiness"></p>
 <p>Firmware: <select id="fw"></select>
-<label>Memory: <select id="mem"><option value="512">normal (n=512)</option><option value="128" selected>low (n=128)</option><option value="64">ultra-low (n=64)</option><option value="emergency">emergency (n=32, full carrier)</option></select></label></p>
+<label>Memory: <select id="mem"><option value="512">normal (n=512)</option><option value="128" selected>low (n=128)</option><option value="64">ultra-low (n=64)</option><option value="emergency">emergency (n=32, full carrier)</option></select></label>
+<label>Spray: <select id="car"><option value="2000000" selected>emergency (16 MB)</option><option value="4000000">low (31 MB)</option><option value="6000000">medium (46 MB)</option><option value="9000000">full (69 MB)</option></select></label></p>
 <p><button id="go" disabled>Run notify proof</button>
 <button id="call" disabled>Call stub (?call=)</button>
 <button id="wmap" disabled>Map readability (?wmap=1)</button></p>
@@ -61,6 +62,7 @@ const wmapEl = document.getElementById("wmap");
 const sweepEl = document.getElementById("sweep");
 const wsweepEl = document.getElementById("wsweep");
 const memEl = document.getElementById("mem");
+const carEl = document.getElementById("car");
 const sinkEl = document.getElementById("sink");
 const dbbatchEl = document.getElementById("dbbatch");
 const dbstatEl = document.getElementById("dbstat");
@@ -172,6 +174,12 @@ function buildQuery(scan) {
     if (memEl.value === "emergency") { q.set("n", "32"); }
     else if (memEl.value !== "512") { q.set("n", memEl.value); }
   }
+  /* The dominant memory cost, and the one that produces "There is not enough
+     free system memory". CARRIER_SLOTS defaults to 9,000,000 -> 69 MB handed
+     to a single allocation before anything else happens. Upstream documents
+     car=2000000 as "emergency mode ... for consoles too starved for the full
+     array", so that is the default here. */
+  q.set("car", (carEl && carEl.value) || "2000000");
   return q;
 }
 
