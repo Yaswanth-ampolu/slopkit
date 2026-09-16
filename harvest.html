@@ -68,6 +68,7 @@ var R = new NeonRelay(NEON_HOST, NEON_DSN);
 var TAGS = ["SCAN-PEEK-DONE","SCAN-WPEEK-DONE","SCAN-WMAP-DONE","SCAN-PROBE-DONE",
   "SCAN-TASKA-DONE","AUTO-RETRY-NOT-SCHEDULED","AUTO-RETRY-AFTER-FAILURE",
   "AUTO-RETRY-CANCELLED","AUTO-RETRY-SCHEDULED","ATTEMPT-CEILING","SCAN-NOBASE",
+  "SCAN-NOBASE-REASON","SCAN-BASECAND","SCAN-BASETRY",
   "SCAN-GADGET","SCAN-SYSCALL","SCAN-MISSING","SCAN-START","SCAN-RANGE",
   "SCAN-PROBE","SCAN-WMAP","SCAN-PEEK","SCAN-WPEEK","SCAN-COVER","SCAN-DONE",
   "SCAN-PG","DB-SUMMARY","ATTEMPT-START","SSV-BUILD"
@@ -100,6 +101,7 @@ function parseSyscall(extra) {
 
 function collect(lines) {
   var gadgets = {}, gOrder = [], syscalls = {}, missing = [], done = null;
+  var baseCand = null, baseFail = null, baseTries = [];
   var attempts = {}, conflicts = {};
   for (var i = 0; i < lines.length; i++) {
     var sp = splitLine(lines[i]); var tag = sp[0], extra = sp[1];
@@ -120,6 +122,12 @@ function collect(lines) {
       missing.push(extra.trim());
     } else if (tag === "SCAN-DONE") {
       done = extra;
+    } else if (tag === "SCAN-BASECAND") {
+      baseCand = extra;
+    } else if (tag === "SCAN-NOBASE-REASON") {
+      baseFail = extra;
+    } else if (tag === "SCAN-BASETRY") {
+      baseTries.push(extra);
     }
   }
   var at = [];
@@ -149,7 +157,8 @@ function collect(lines) {
 
   return { gadgets: gadgets, gOrder: gOrder, syscalls: syscalls,
            missing: missing, done: done, attempts: at.sort(),
-           conflicts: conflicts, gaps: gaps, count: lines.length };
+           conflicts: conflicts, gaps: gaps, count: lines.length,
+           baseCand: baseCand, baseFail: baseFail, baseTries: baseTries };
 }
 
 function hex8(v) {
@@ -279,6 +288,24 @@ function loadDb(stream) {
   });
 }
 
+/* Whether webkitBase resolved decides everything downstream. If none of the
+   candidate host-constructor offsets fit, the exploit cannot place its fake
+   object and no amount of scanning will produce a gadget -- so say it loudly
+   and show the raw addresses needed to solve for the right offset. */
+function baseRow(r) {
+  if (r.baseFail) {
+    return "<tr><td>BASE</td><td class=\"err\"><b>FAILED</b> &mdash; no candidate "
+      + "host-constructor offset fit. " + r.baseCand + "</td></tr>";
+  }
+  var ok = null;
+  for (var i = 0; i < r.baseTries.length; i++) {
+    if (/-ok=true/.test(r.baseTries[i])) { ok = r.baseTries[i]; break; }
+  }
+  if (ok) return "<tr><td>BASE</td><td class=\"ok\">resolved &mdash; " + ok + "</td></tr>";
+  if (r.baseCand) return "<tr><td>BASE</td><td>" + r.baseCand + "</td></tr>";
+  return "<tr><td>BASE</td><td class=\"dim\">not reached</td></tr>";
+}
+
 function gotLines(rows, label, summary) {
   if (!rows.length) {
     say("nothing found for " + label + ". Run the sweep with that sink selected.", "warn");
@@ -299,6 +326,7 @@ function gotLines(rows, label, summary) {
     + "<tr><td>source</td><td><b>" + label + "</b></td></tr>"
     + "<tr><td>lines</td><td><b>" + rows.length + "</b></td></tr>"
     + "<tr><td>attempts</td><td><b>" + (r.attempts.join(", ") || "-") + "</b></td></tr>"
+    + baseRow(r)
     + "<tr><td>SCAN-DONE</td><td>" + (r.done
         ? '<b class="ok">' + r.done + "</b>"
         : '<b class="warn">sweep did not finish</b>') + "</td></tr>"

