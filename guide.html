@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slopkit Field Guide</title>
+<style>
+html,body{margin:0;min-height:100%;background:#0c0c0f;color:#ccc;
+  font-family:Arial,sans-serif;-webkit-text-size-adjust:100%}
+body{display:flex;flex-direction:column;align-items:center;padding:20px 12px 60px}
+#box{max-width:820px;width:100%}
+
+/* Larger than the other pages on purpose: this gets read off a TV from a
+   couch, not sitting at a desk. */
+h1{font-size:30px;color:#fff;margin:0 0 4px;letter-spacing:.5px}
+.sub{font-size:15px;color:#8fa1b3;margin:0 0 24px}
+h2{font-size:23px;color:#fff;margin:34px 0 12px;padding-bottom:8px;
+  border-bottom:2px solid #2a2a2e}
+h3{font-size:18px;color:#cfe3ff;margin:20px 0 8px}
+p,li{font-size:17px;line-height:1.6}
+ol,ul{padding-left:26px;margin:10px 0}
+li{margin:7px 0}
+code{font-family:Consolas,monospace;font-size:15px;background:#0a0a0d;
+  border:1px solid #222;border-radius:4px;padding:1px 5px;color:#9fd0ff}
+pre{font-family:Consolas,monospace;font-size:14px;line-height:1.5;background:#0a0a0d;
+  border:1px solid #222;border-radius:6px;padding:12px;overflow:auto;
+  white-space:pre-wrap;word-break:break-all;margin:10px 0}
+b,strong{color:#fff}
+a{color:#7fb3ff}
+.linkbtn,button{font-size:17px;padding:10px 16px;margin:4px 6px 4px 0;
+  border-radius:8px;background:#223146;color:#cfe3ff;border:2px solid #5e81ac;
+  cursor:pointer;text-decoration:none;display:inline-block}
+.nav{margin:16px 0 8px}
+.card{background:#141419;border:1px solid #2a2a2e;border-radius:10px;
+  padding:16px 18px;margin:14px 0}
+.warn{background:#1e1416;border:1px solid #7a2f38;border-radius:10px;
+  padding:16px 18px;margin:14px 0}
+.warn h3{color:#ff8f9a;margin-top:0}
+.ok{background:#101a10;border:1px solid #2f6b2f;border-radius:10px;
+  padding:16px 18px;margin:14px 0}
+.ok h3{color:#7ee07e;margin-top:0}
+.stop{background:#1c1206;border:1px solid #8a6410;border-radius:10px;
+  padding:16px 18px;margin:14px 0}
+.stop h3{color:#ffc247;margin-top:0}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:16px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid #26262b;
+  vertical-align:top}
+th{color:#9fb1c3;font-size:14px;letter-spacing:.5px}
+tr:last-child td{border-bottom:none}
+.stepnum{display:inline-block;min-width:34px;height:34px;line-height:34px;
+  text-align:center;border-radius:50%;background:#223146;color:#cfe3ff;
+  border:2px solid #5e81ac;font-weight:bold;font-size:17px;margin-right:10px}
+.pill{display:inline-block;font-size:13px;padding:3px 9px;border-radius:20px;
+  border:1px solid #333;background:#0a0a0d;color:#8fa1b3;margin-left:6px}
+.v{color:#16c60c}.x{color:#e74856}.w{color:#e5a00d}
+hr{border:0;border-top:1px solid #26262b;margin:30px 0}
+.toc a{display:block;font-size:16px;padding:5px 0}
+</style>
+</head>
+<body>
+<div id="box">
+
+<a class="linkbtn" href="notify-launcher.html">&larr; Launcher</a>
+
+<h1>Slopkit Field Guide</h1>
+<p class="sub">Console-side gadget sweep, start to finish. Read this once before
+you touch anything.</p>
+
+<div class="toc card">
+<b>Contents</b>
+<a href="#s0">0 &mdash; Safety (do first)</a>
+<a href="#s1">1 &mdash; Offline or online?</a>
+<a href="#s2">2 &mdash; Open the launcher</a>
+<a href="#s3">3 &mdash; Set the controls</a>
+<a href="#s4">4 &mdash; Run the sweep</a>
+<a href="#s5">5 &mdash; Read the result</a>
+<a href="#s6">6 &mdash; Harvest (online only)</a>
+<a href="#s7">7 &mdash; Use the file</a>
+<a href="#s8">8 &mdash; Troubleshooting</a>
+</div>
+
+<div class="stop">
+<h3>&#9888; What this can and cannot do</h3>
+<p>This sweep <b>reads memory and reports what it found</b>. It does not write
+firmware, does not install anything, and cannot brick the console.</p>
+<p>The realistic worst case is a <b>kernel panic</b> &mdash; a crash you clear by
+holding the power button. That is not a brick.</p>
+<p>The thing that actually ends your jailbreak is a <b>firmware update</b>, not
+this tool. See step 0.</p>
+</div>
+
+<h2 id="s0"><span class="stepnum">0</span>Safety &mdash; do this first</h2>
+
+<div class="warn">
+<h3>Do these before touching the network</h3>
+<ol>
+<li><b>Settings &rarr; System &rarr; System Software &rarr; Auto-Updates</b>
+<ul>
+<li>Untick <b>Download System Software Files Automatically</b></li>
+<li>Untick <b>Install System Software Automatically</b></li>
+</ul></li>
+<li>If you can: <b>Settings &rarr; Network &rarr; Set Up Internet Connection &rarr;
+your network &rarr; Advanced &rarr; DNS Settings</b> &rarr; point it at a
+filtering resolver (NextDNS, ControlD).</li>
+<li><b>Do not sign into PSN on this console.</b></li>
+</ol>
+<p style="margin-bottom:0">If firmware 14.00 installs, it patches the kernel bug
+and there is <b>no downgrade path</b>. That ends the jailbreak permanently.
+This matters far more than any ban risk.</p>
+</div>
+
+<h2 id="s1"><span class="stepnum">1</span>Offline or online?</h2>
+
+<p>You get to choose. <b>Choose offline for your first run.</b></p>
+
+<table>
+<tr><th></th><th>Offline</th><th>Online</th></tr>
+<tr><td>Update risk</td><td class="v">zero</td><td class="x">real</td></tr>
+<tr><td>Ban risk</td><td class="v">zero</td><td class="w">low</td></tr>
+<tr><td>Results</td><td>on screen, photograph it</td><td>file downloads from the DB</td></tr>
+<tr><td>Use when</td><td>first run, validating</td><td>you need a big dump off the console</td></tr>
+</table>
+
+<p>The sweep works <b>completely offline</b>. The database upload is only a
+convenience for shipping results off the console &mdash; it is not required to
+find gadgets.</p>
+
+<h2 id="s2"><span class="stepnum">2</span>Open the launcher</h2>
+
+<pre>https://yaswanth-ampolu.github.io/slopkit/notify-launcher.html</pre>
+
+<p>Top to bottom you should see:</p>
+<ul>
+<li><code>Back</code> link, then the <b>PS5 Notify Launcher</b> heading</li>
+<li>Your detected firmware line</li>
+<li><code>Firmware:</code> dropdown &middot; <code>Memory:</code> dropdown</li>
+<li><code>Run notify proof</code> &middot; <code>Call stub (?call=)</code> &middot; <code>Map readability (?wmap=1)</code></li>
+<li><code>Call stub rva</code> box</li>
+<li><code>Sweep gadgets from</code> box &middot; <code>Sweep gadgets</code> button</li>
+<li><b><code>Send findings to database</code></b> checkbox &middot; <code>batch</code> box</li>
+<li>A status line: <code>db: reachable &mdash; X MiB used of 500 MiB</code></li>
+<li><code>Harvest what the console uploaded &rarr;</code> link</li>
+</ul>
+<p>The db status line turns <span class="v">green</span> if the database is
+reachable, <span class="x">red</span> and auto-untickes the box if not.</p>
+
+<h2 id="s3"><span class="stepnum">3</span>Set the controls</h2>
+
+<h3><code>Firmware:</code> dropdown</h3>
+<p>Pick <b>13.60</b>. If the page detected your User-Agent it is already set.</p>
+
+<h3><code>Memory:</code> dropdown</h3>
+<p>Leave it at <b><code>low (n=128)</code></b>.</p>
+<ul>
+<li>Panics before any output? &rarr; drop to <code>ultra-low (n=64)</code>,
+then <code>emergency (n=32, full carrier)</code></li>
+<li>Higher <code>n</code> is faster but uses more memory</li>
+</ul>
+
+<h3><code>Send findings to database</code> checkbox</h3>
+<p><b>Untick it</b> for the first run. See step 1.</p>
+
+<h3><code>Sweep gadgets from</code> box</h3>
+<p>Leave the default <code>2B00000</code>.</p>
+<p>This sets <code>wstart</code>, which jumps the sweep start to
+<code>webkitBase + 0x2B00000</code>, skipping a region that was already found
+unreadable.</p>
+<div class="card">
+<p style="margin:0"><b>Gotcha:</b> clearing the box does <i>not</i> mean "start
+from zero" &mdash; empty falls back to <code>2B00000</code>. To genuinely start
+at zero, type <code>0</code>.</p>
+</div>
+
+<h2 id="s4"><span class="stepnum">4</span>Run the sweep</h2>
+
+<p>Click <b><code>Sweep gadgets</code></b>.</p>
+
+<p>That opens <code>notify.html</code> with:</p>
+<pre>?go=1&amp;auto=1&amp;fw=13.60&amp;&hellip;&amp;scan=1&amp;lines=400&amp;notaska=1&amp;scanmb=8&amp;wstart=0x2B00000</pre>
+
+<p>It then:</p>
+<ol>
+<li>Runs the notify proof to establish <code>webkitBase</code> and <code>kernelBase</code></li>
+<li>Scans <code>libkernel_web</code> .text for syscall stubs</li>
+<li>Scans 8 MB of <code>libSceNKWebKit</code> .text for the 21 ROP gadgets</li>
+</ol>
+
+<div class="warn">
+<h3>Watch the screen the whole time</h3>
+<p style="margin-bottom:0">Expect <b>several minutes</b>. Closing the tab loses
+the run. Do not touch the console while it works.</p>
+</div>
+
+<h2 id="s5"><span class="stepnum">5</span>Read the result</h2>
+
+<table>
+<tr><th>Line you see</th><th>Meaning</th></tr>
+<tr><td><code>SCAN-START webkit=&hellip; kernel=&hellip;</code></td><td class="v">bases found, sweep running</td></tr>
+<tr><td><code>SCAN-GADGET pop rdi-rva=0x288b2</code></td><td class="v">a gadget was found</td></tr>
+<tr><td><code>SCAN-SYSCALL n=0x1-rva=&hellip;-d=&hellip;</code></td><td class="v">a syscall stub was found</td></tr>
+<tr><td><code>SCAN-COVER mb-done=&hellip;</code></td><td>progress heartbeat</td></tr>
+<tr><td><code>SCAN-MISSING pop rsp</code></td><td class="w">not in the scanned window</td></tr>
+<tr><td><code>SCAN-DONE gadgets=19/21-&hellip;</code></td><td class="v">sweep finished</td></tr>
+<tr><td><code>SCAN-NOBASE</code></td><td class="x">proof failed &mdash; sweep never ran</td></tr>
+</table>
+
+<div class="warn">
+<h3>If you see SCAN-NOBASE, stop</h3>
+<p style="margin-bottom:0">Nothing downstream can help. The wall is the notify
+proof, not the tooling. The offsets in <code>FW13_60_RAW</code> are wrong and
+that is where the work is.</p>
+</div>
+
+<div class="ok">
+<h3>If you see SCAN-GADGET lines, you are through</h3>
+<p style="margin-bottom:0">Photograph the screen. That is the entire payload
+&mdash; you can stop here and never go online.</p>
+</div>
+
+<h2 id="s6"><span class="stepnum">6</span>Harvest &mdash; online only</h2>
+
+<p><b>Skip this entirely if you ran offline.</b></p>
+
+<ol>
+<li>Back on the launcher, <b>tick <code>Send findings to database</code></b></li>
+<li>Click <b><code>Sweep gadgets</code></b> again &mdash; now <code>db=1</code>
+is added and findings batch to the database as they are produced</li>
+<li>When it finishes, click <b><code>Harvest what the console uploaded &rarr;</code></b></li>
+<li>Leave the <code>stream</code> box at <code>notify-1360</code></li>
+<li>Click <b><code>Load findings</code></b></li>
+</ol>
+
+<p>Read the <b>Coverage</b> table:</p>
+
+<table>
+<tr><th>Field</th><th>Good</th><th>Bad</th></tr>
+<tr><td><code>beacons</code></td><td>hundreds</td><td class="x">no beacons for &hellip;</td></tr>
+<tr><td><code>SCAN-DONE</code></td><td class="v">gadgets=19/21-&hellip;</td><td class="x">sweep did not finish</td></tr>
+<tr><td><code>gadgets</code></td><td class="v">found, 0 missing</td><td class="x">red missing list</td></tr>
+<tr><td><code>unstable</code></td><td>absent</td><td class="x">RVAs differed &mdash; do not trust</td></tr>
+</table>
+
+<p>Then click <b><code>Download offsets</code></b> (or <code>Copy</code>). You get:</p>
+
+<pre>let wk_gadgetmap = { "ret": 0x&hellip;, "pop rdi": 0x&hellip;, &hellip; };
+let syscall_map  = { 0x001: 0x&hellip;, 0x02A: 0x&hellip; };</pre>
+
+<h2 id="s7"><span class="stepnum">7</span>Use the file</h2>
+
+<p>It fills the two tables <code>13.60.js</code> currently leaves empty:</p>
+
+<pre>// Intentionally empty: fill from newer slopkit before use with old main.js.
+let wk_gadgetmap = {};
+let syscall_map = {};</pre>
+
+<p>Replace those two lines with the generated ones. <b>Keep the existing
+<code>FW13_60_RAW</code> block above them</b> &mdash; it holds the host-constructor
+candidates and the notify offset, which the sweep does not produce.</p>
+
+<h2 id="s8"><span class="stepnum">8</span>Troubleshooting</h2>
+
+<table>
+<tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+<tr><td><code>SCAN-NOBASE</code></td><td>notify proof never armed</td><td>The real wall. <code>FW13_60_RAW</code> offsets are wrong.</td></tr>
+<tr><td>Tab crashes, no output</td><td>out of memory</td><td>Set <code>Memory:</code> to <code>ultra-low</code> or <code>emergency</code></td></tr>
+<tr><td>Kernel panic partway</td><td>bad read</td><td>Reboot, set <code>wstart</code> to <code>0</code>, retry</td></tr>
+<tr><td>Several <code>SCAN-MISSING</code></td><td>window too small</td><td>Edit the URL: raise <code>scanmb</code> to <code>16</code></td></tr>
+<tr><td><code>db: UNREACHABLE</code></td><td>network blocked the endpoint</td><td>Box auto-untickes. Run offline instead.</td></tr>
+<tr><td>Sweep ok, harvest empty</td><td><code>db=1</code> was not set</td><td>Re-run with the checkbox ticked</td></tr>
+</table>
+
+<hr>
+
+<div class="card">
+<p><b>The one thing that decides everything</b></p>
+<p style="margin-bottom:0">Steps 0&ndash;5 are safe, offline and reversible.
+Step 6 is the only one that touches the network &mdash; and you can complete the
+entire technical goal without ever doing it.</p>
+</div>
+
+<div class="nav">
+<a class="linkbtn" href="notify-launcher.html">&larr; Back to the launcher</a>
+<a class="linkbtn" href="harvest.html">Open the harvester</a>
+</div>
+
+</div>
+</body>
+</html>
