@@ -29,6 +29,12 @@ td{padding:2px 14px 2px 0;color:#8fa1b3;vertical-align:top}
 <p><a class="linkbtn" href="notify-launcher.html">&larr; Launcher</a>
 <a class="linkbtn" href="guide.html">Field guide</a></p>
 <h1>Sweep Harvester</h1>
+<div style="margin:8px 0;padding:8px;border:1px solid #555;border-radius:6px">
+  <label>Neon DSN (kept in this browser only, never committed):
+    <input id="dsn" type="password" size="60" placeholder="postgresql://..."></label>
+  <button onclick="localStorage.setItem('slopkit.dsn',document.getElementById('dsn').value)">
+    Save locally</button>
+</div>
 <p>Reads the findings your console already uploaded and builds the two tables
 <code>13.60.js</code> currently leaves empty &mdash; <code>wk_gadgetmap</code> and
 <code>syscall_map</code>. All in this page. No PC tooling, no Python.</p>
@@ -58,7 +64,7 @@ td{padding:2px 14px 2px 0;color:#8fa1b3;vertical-align:top}
 
 /* Same credential as notify.html -- see the warning there. */
 var NEON_HOST = "ep-bitter-breeze-b41m27ic-pooler.c-6.us-east-2.aws.neon.tech";
-var NEON_DSN  = "postgresql://neondb_owner:npg_fKnZ7gMLFI2i@" + NEON_HOST
+var NEON_DSN  = "postgresql://neondb_owner:localStorage.getItem('slopkit.dsn')@" + NEON_HOST
               + "/neondb?sslmode=require";
 var R = new NeonRelay(NEON_HOST, NEON_DSN);
 
