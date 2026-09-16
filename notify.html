@@ -46,7 +46,7 @@ body {
 (function () {
     var el = document.getElementById("buildbadge");
     if (!el) return;
-    el.textContent = "BUILD b7";
+    el.textContent = "BUILD b8";
     el.style.cssText = "position:fixed;top:0;right:0;z-index:2147483647;"
         + "background:#0a7d00;color:#fff;font:700 13px/1 monospace;"
         + "padding:6px 10px;border-bottom-left-radius:6px;pointer-events:none";
@@ -393,8 +393,18 @@ const REVISION = "renderer-notify-auto-proof-2";
 // The user could not tell a stale cached page from a fresh one, which made
 // every "I ran the new one" report unfalsifiable. BUILD is stamped into the
 // title, a fixed corner badge, and every log line's first mark.
-const BUILD = "b7";
+const BUILD = "b8";
 const BUILD_STAMP = REVISION + "+" + BUILD;
+const WANT_BUILD = Q.get("b");
+if (WANT_BUILD !== null && WANT_BUILD !== BUILD) {
+    // The driver expected a different build: this is a cached copy.
+    try {
+        document.title = "STALE " + BUILD + " wanted " + WANT_BUILD;
+        const el = document.getElementById("buildbadge");
+        if (el) { el.textContent = "STALE " + BUILD + " != " + WANT_BUILD;
+                  el.style.background = "#b00"; }
+    } catch (e) {}
+}
 // Belt and braces: if any part of the chain raises a JS dialog we must not let
 // it block the deadline timer from navigating.
 try {
