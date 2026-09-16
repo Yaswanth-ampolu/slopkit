@@ -25,7 +25,7 @@ td.m{font-family:Consolas,monospace;font-size:14px}
 </style>
 </head>
 <body>
-<div id="buildbadge" style="position:fixed;top:0;right:0;z-index:2147483647;background:#0a7d00;color:#fff;font:700 13px/1 monospace;padding:6px 10px;border-bottom-left-radius:6px;pointer-events:none">DRIVER b9</div>
+<div id="buildbadge" style="position:fixed;top:0;right:0;z-index:2147483647;background:#0a7d00;color:#fff;font:700 13px/1 monospace;padding:6px 10px;border-bottom-left-radius:6px;pointer-events:none">DRIVER b10</div>
 <div id="box">
 <a class="linkbtn" href="notify-launcher.html">&larr; Launcher</a>
 <a class="linkbtn" href="guide.html">Field guide</a>
@@ -90,7 +90,7 @@ gadget map is assembled from all the chunks afterwards.
 /* The queue lives in localStorage because every chunk is a separate page load:
    notify.html navigates back here with ?done=<index> when the chunk ends,
    however it ends. Nothing survives in memory between chunks. */
-var BUILD = "b9";
+var BUILD = "b10";
 var LS = "slopkit.autorun.v4";
 var state = null;
 
@@ -207,7 +207,7 @@ function launch(i) {
   // A state saved before these fields existed resumes with undefined, and
   // String(undefined) made the console fall back to its 69 MB default spray.
   // Guard every one of them.
-  q.set("car", String(state.car == null ? 1000000 : state.car))
+  q.set("car", String(state.car == null ? 600000 : state.car))
   q.set("max", String(state.max == null ? 200 : state.max))
   // Give the console page a wall-clock budget, then it walks itself to the
   // next chunk even if a native memory dialog is sitting over the browser.
@@ -226,7 +226,7 @@ function launch(i) {
   // silently skipped. The badge proved the DRIVER was fresh while the page
   // actually doing the work was stale.
   q.set("b", BUILD);
-  location.href = "notify.html?" + q.toString() + "&_=" + Date.now();
+  location.href = "sweep.html?" + q.toString() + "&_=" + Date.now();
 }
 
 /* ------------------------------------------------------------ page load -- */
