@@ -41,6 +41,7 @@ body {
 <body>
 <div id="cap">PoC PS5 FW &mdash;</div>
 <img id="cat" class="run" src="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%20240%20240%27%3E%3Crect%20width%3D%27240%27%20height%3D%27240%27%20rx%3D%2724%27%20fill%3D%27%23131922%27/%3E%3Crect%20x%3D%2740%27%20y%3D%2752%27%20width%3D%27160%27%20height%3D%2794%27%20rx%3D%2718%27%20fill%3D%27%23223146%27%20stroke%3D%27%235e81ac%27%20stroke-width%3D%278%27/%3E%3Ccircle%20cx%3D%2795%27%20cy%3D%2799%27%20r%3D%2712%27%20fill%3D%27%23ebcb8b%27/%3E%3Ccircle%20cx%3D%27145%27%20cy%3D%2799%27%20r%3D%2712%27%20fill%3D%27%23ebcb8b%27/%3E%3Cpath%20d%3D%27M88%20128h64%27%20stroke%3D%27%23ebcb8b%27%20stroke-width%3D%2710%27%20stroke-linecap%3D%27round%27/%3E%3Ctext%20x%3D%27120%27%20y%3D%27192%27%20fill%3D%27%239fb1c3%27%20font-size%3D%2724%27%20font-family%3D%27Arial%27%20text-anchor%3D%27middle%27%3EPS5%3C/text%3E%3C/svg%3E" alt="PS5 status">
+<script src="neon_client.js"></script>
 <script>
 "use strict";
 
@@ -359,6 +360,10 @@ async function runOnConsoleScan(candidate) {
         mark("SCAN-SYSCALL", `n=0x${num.toString(16)}-rva=${hex(sysFound[num].rva)}-d=${sysFound[num].d}`);
     }
     mark("SCAN-DONE", `gadgets=${Object.keys(gadFound).length}/${SCAN_GADGETS.length}-syscalls=${nums.length}-hits=${sysHits}`);
+    if (DB) {
+        mark("DB-SUMMARY", `stream=${DB_STREAM}-batch=${DB_BATCH}`);
+        dbFlush();   // don't wait for beforeunload: the sweep is the payload
+    }
     scanDone = true;
 }
 
@@ -647,6 +652,54 @@ function screenLine(text) {
 const LOG_ON = Q.get("log") === "1"
     || (Q.get("log") !== "0" && !/github\.io$/i.test(location.hostname));
 
+// ---- batched upload of findings to Neon (?db=1). -------------------------
+// mark() fires for every finding, and a gadget sweep emits hundreds of them
+// (SCAN-GADGET, SCAN-SYSCALL, SCAN-PEEK...). One HTTP request per line would be
+// hundreds of round trips at ~800ms fixed cost each. Instead they queue and go
+// out DB_BATCH at a time through a single put_beacons() call. The queue also
+// flushes synchronously on unload, so a console panic mid-sweep costs at most
+// one partial batch rather than the whole run.
+const DB_ON = Q.get("db") === "1";
+const DB_BATCH = intParam("dbbatch", 25, 1, 200);
+const DB_HOST = "ep-bitter-breeze-b41m27ic-pooler.c-6.us-east-2.aws.neon.tech";
+const DB_DSN = "postgresql://neondb_owner:npg_fKnZ7gMLFI2i@" + DB_HOST
+             + "/neondb?sslmode=require";
+const DB_STREAM = "notify-" + FW_LABEL.replace(/[^0-9]/g, "");
+let DB = null, dbQueue = [], dbSent = 0, dbFailed = 0;
+
+if (DB_ON && typeof NeonRelay === "function") {
+    DB = new NeonRelay(DB_HOST, DB_DSN);
+    DB.headroom(h => screenLine(`DB: ${(h.db_bytes / 1048576).toFixed(1)} MiB used`
+        + ` of ${(h.budget / 1048576).toFixed(0)} MiB, ${h.open_dumps} open dumps`),
+        e => screenLine(`DB: UNREACHABLE ${e.status} ${e.body || ""}`));
+}
+
+function dbFlush() {
+    if (!DB || !dbQueue.length) return;
+    const lines = dbQueue; dbQueue = [];
+    DB.beacons(lines, () => { dbSent += lines.length; },
+                      () => { dbFailed += lines.length; });
+}
+
+// Synchronous last resort: the page is being torn down by a panic, so an async
+// request would never leave. Same endpoint, blocking XHR.
+function dbFlushFinal() {
+    if (!DB || !dbQueue.length) return;
+    const lines = dbQueue; dbQueue = [];
+    try {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `https://${DB_HOST}/sql`, false);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.setRequestHeader("Neon-Connection-String", DB_DSN);
+        xhr.send(JSON.stringify({
+            query: "select public.put_beacons($1::jsonb,$2) as n",
+            params: [JSON.stringify(lines), DB_STREAM]
+        }));
+        dbSent += lines.length;
+    } catch { dbFailed += lines.length; }
+}
+if (DB_ON) window.addEventListener("beforeunload", dbFlushFinal);
+
 function mark(tag, extra) {
     seq++;
     const line = `a${attemptNumber}-r${navigationID}-s${seq}-note-${tag}`
@@ -657,6 +710,10 @@ function mark(tag, extra) {
             xhr.open("GET", `log/${encodeURIComponent(line)}`, false);
             xhr.send();
         } catch {}
+    }
+    if (DB) {
+        dbQueue.push(line);
+        if (dbQueue.length >= DB_BATCH) dbFlush();
     }
     screenLine(`[${String(attemptNumber).padStart(3, "0")}] ${tag}`
         + (extra !== undefined ? ` ${extra}` : ""));

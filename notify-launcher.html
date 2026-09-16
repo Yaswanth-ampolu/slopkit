@@ -33,8 +33,12 @@ button:disabled{opacity:0.4;cursor:default}
 <p><label>Call stub rva <input id="callrva" size="8" placeholder="1B860"></label></p>
 <p><label>Sweep gadgets from <input id="wsweep" size="8" placeholder="2B00000"></label>
 <button id="sweep" disabled>Sweep gadgets</button></p>
+<p><label><input type="checkbox" id="db" checked> Send findings to database</label>
+<label>batch <input id="dbbatch" size="3" value="25"></label></p>
+<p id="dbstat" class="note">&nbsp;</p>
 <div id="status">loading offsets.json&hellip;</div>
 </div>
+<script src="neon_client.js"></script>
 <script src="compatibility.js"></script>
 <script>
 "use strict";
@@ -48,6 +52,9 @@ const wmapEl = document.getElementById("wmap");
 const sweepEl = document.getElementById("sweep");
 const wsweepEl = document.getElementById("wsweep");
 const memEl = document.getElementById("mem");
+const dbEl = document.getElementById("db");
+const dbbatchEl = document.getElementById("dbbatch");
+const dbstatEl = document.getElementById("dbstat");
 const notifyAvailabilityEl = document.getElementById("notify-availability");
 const notifyReadinessEl = document.getElementById("notify-readiness");
 const OFFSETS_VERSION = "20260916";
@@ -69,6 +76,28 @@ if (notifyAvailabilityEl) {
 }
 if (notifyReadinessEl) {
   notifyReadinessEl.textContent = compat.texts.notifyReadiness;
+}
+
+/* Probe the relay before the sweep starts. A failed upload should be found
+   here, not three minutes into a gadget scan on the console. */
+const DB_HOST = "ep-bitter-breeze-b41m27ic-pooler.c-6.us-east-2.aws.neon.tech";
+const DB_DSN = "postgresql://neondb_owner:npg_fKnZ7gMLFI2i@" + DB_HOST
+             + "/neondb?sslmode=require";
+if (dbstatEl && typeof NeonRelay === "function") {
+  dbstatEl.textContent = "db: checking\u2026";
+  new NeonRelay(DB_HOST, DB_DSN).headroom(
+    h => {
+      dbstatEl.className = "done";
+      dbstatEl.textContent = "db: reachable \u2014 "
+        + (h.db_bytes / 1048576).toFixed(1) + " MiB used of "
+        + (h.budget / 1048576).toFixed(0) + " MiB, " + h.open_dumps + " open dumps";
+    },
+    e => {
+      dbstatEl.className = "note";
+      dbstatEl.textContent = "db: UNREACHABLE (" + e.status + ") "
+        + (e.body || "") + " \u2014 unchecking";
+      if (dbEl) dbEl.checked = false;
+    });
 }
 
 async function load() {
@@ -118,6 +147,10 @@ function buildQuery(scan) {
   q.set("ers", e.ers);
   q.set("ere", e.ere);
   if (scan) { q.set("scan", "1"); q.set("lines", "400"); }
+  if (dbEl && dbEl.checked) {
+    q.set("db", "1");
+    q.set("dbbatch", (dbbatchEl && dbbatchEl.value) || "25");
+  }
   if (memEl) {
     if (memEl.value === "emergency") { q.set("n", "32"); }
     else if (memEl.value !== "512") { q.set("n", memEl.value); }
